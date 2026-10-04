@@ -1,0 +1,5 @@
+{
+  "name": "agentverify-active-tab-extension",
+  "private": true,
+  "type": "module"
+}

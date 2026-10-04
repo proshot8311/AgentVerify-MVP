@@ -1,0 +1,12 @@
+{
+  "manifest_version": 3,
+  "name": "AgentVerify — Active Tab Verifier",
+  "version": "0.1.0",
+  "description": "Check a claim against the rendered DOM in your active browser tab.",
+  "minimum_chrome_version": "111",
+  "permissions": ["activeTab", "scripting"],
+  "action": {
+    "default_title": "Verify current page",
+    "default_popup": "popup.html"
+  }
+}

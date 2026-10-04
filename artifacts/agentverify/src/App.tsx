@@ -60,7 +60,7 @@ function Landing() {
       <div><p className="statement-copy">An AI agent's completion message is a claim, not proof.</p><p className="statement-detail">AgentVerify keeps the gap between “done” and trust visible. Define the outcome you expect, inspect what a browser can actually observe, and keep the evidence attached to every verdict.</p></div>
     </section>
     <section className="feature-row">
-      <div className="feature"><div className="feature-icon"><Globe2 size={17} /></div><h3>Observe the browser, not the story</h3><p>Inspect fetched HTML or the rendered demo DOM. No model interpretation, no inferred state.</p></div>
+      <div className="feature"><div className="feature-icon"><Globe2 size={17} /></div><h3>Observe the browser, not the story</h3><p>The Chrome extension inspects the active tab's rendered DOM. Dashboard URL fetches are best-effort and may be blocked by CORS.</p></div>
       <div className="feature"><div className="feature-icon"><FileCheck2 size={17} /></div><h3>Every check leaves a trail</h3><p>Expected, observed, and evidence stay side by side—ready to inspect or export.</p></div>
       <div className="feature"><div className="feature-icon"><ShieldCheck size={17} /></div><h3>Local by design</h3><p>Contracts and verification runs stay in this browser's local storage. No account or remote service.</p></div>
     </section>
@@ -125,11 +125,11 @@ function ContractBuilder() {
     }
   }
   return <main className="app-main">
-    <Header eyebrow="Contract / define observable outcomes" title="New verification contract" subtitle="Write checks a browser can answer from fetched HTML. Unconfigured checks are skipped; an inspection failure is reported as unavailable, never guessed." />
+    <Header eyebrow="Contract / define observable outcomes" title="New verification contract" subtitle="Dashboard URL checks use best-effort fetches and may be blocked by CORS. Use the Chrome extension for direct active-tab DOM verification; unavailable content is never inferred." />
     <form onSubmit={submit} className="panel panel-pad" style={{ marginTop: 28 }}>
       <div className="form-grid">
         <div className="field span-2"><label htmlFor="contract-name">Contract Name</label><input id="contract-name" className="input" data-testid="input-contract-name" placeholder="e.g. Project task created" value={name} onChange={e => setName(e.target.value)} required /></div>
-        <div className="field span-2"><label htmlFor="target-url">Target URL</label><input id="target-url" className="input mono" data-testid="input-target-url" placeholder="https://example.com/tasks" value={url} onChange={e => setUrl(e.target.value)} required inputMode="url" /><small>The browser fetches this HTTP(S) URL directly. Cross-origin sites may block inspection via CORS.</small></div>
+        <div className="field span-2"><label htmlFor="target-url">Target URL</label><input id="target-url" className="input mono" data-testid="input-target-url" placeholder="https://example.com/tasks" value={url} onChange={e => setUrl(e.target.value)} required inputMode="url" /><small>Best-effort HTTP fetch only; CORS and browser restrictions can block inspection. Use the extension to inspect an external page open in the active tab.</small></div>
         <div className="field span-2"><label htmlFor="agent-claim">Agent Claim</label><textarea id="agent-claim" className="textarea" data-testid="input-agent-claim" placeholder="What did the agent say it completed?" value={claim} onChange={e => setClaim(e.target.value)} required /></div>
         <div className="field"><label htmlFor="required-text">Required Text</label><input id="required-text" className="input" data-testid="input-required-text" placeholder="Exact phrase expected in page text" value={required} onChange={e => setRequired(e.target.value)} /><small>Case-insensitive exact phrase. Leave blank to skip.</small></div>
         <div className="field"><label htmlFor="forbidden-text">Forbidden Text</label><input id="forbidden-text" className="input" data-testid="input-forbidden-text" placeholder="Phrase that must not appear" value={forbidden} onChange={e => setForbidden(e.target.value)} /><small>Case-insensitive absence check. Leave blank to skip.</small></div>
@@ -152,7 +152,7 @@ function ResultPage() {
   const run = getRun(id);
   if (!run) return <main className="app-main"><Header eyebrow="Evidence ledger / unavailable" title="Run not found" subtitle="This record may have been removed from this browser's localStorage." /><Link href="/dashboard" className="button" style={{ marginTop: 20 }} data-testid="button-back-dashboard"><ArrowLeft size={14} />Back to dashboard</Link></main>;
   return <main className="app-main">
-    <div className="receipt-head"><Header eyebrow={`Verification result / ${run.source === "demo" ? "local DOM" : "browser fetch"}`} title="Run evidence" subtitle={`ID ${run.id} · ${formatTime(run.timestamp)}`} /><div className="receipt-actions"><Link href={`/receipts/${run.id}`} className="button small" data-testid="button-open-receipt"><FileCheck2 size={14} />Receipt</Link><Link href="/dashboard" className="button ghost small" data-testid="button-results-dashboard">Dashboard</Link></div></div>
+    <div className="receipt-head"><Header eyebrow={`Verification result / ${run.source === "demo" ? "local DOM" : "best-effort browser fetch"}`} title="Run evidence" subtitle={`ID ${run.id} · ${formatTime(run.timestamp)}`} /><div className="receipt-actions"><Link href={`/receipts/${run.id}`} className="button small" data-testid="button-open-receipt"><FileCheck2 size={14} />Receipt</Link><Link href="/dashboard" className="button ghost small" data-testid="button-results-dashboard">Dashboard</Link></div></div>
     <section className="panel panel-pad" style={{ marginTop: 23 }}>
       <div className="receipt-head"><div><div className="eyebrow">FINAL VERDICT</div><div style={{ marginTop: 10 }}><Status verdict={run.verdict} /></div></div><div className="muted mono tiny" data-testid="text-result-timestamp">{formatTime(run.timestamp)}</div></div>
       <div className="summary-grid">
@@ -161,7 +161,7 @@ function ResultPage() {
         <div className="panel summary-box span-2" style={{ gridColumn: "span 2" }}><h3>Observed Outcome</h3><p data-testid="text-observed-outcome">{run.observedOutcome}</p></div>
       </div>
       <div className="divider" />
-      <div style={{ display: "flex", alignItems: "end", justifyContent: "space-between" }}><div><div className="section-label">Deterministic checks</div><div className="muted tiny" style={{ marginTop: 4 }}>Evidence from {run.source === "demo" ? "the rendered task-list DOM" : "browser-fetched HTML"}</div></div><span className="mono muted tiny">{run.checks.filter(c => c.status === "PASS").length}/{run.checks.length} PASS</span></div>
+      <div style={{ display: "flex", alignItems: "end", justifyContent: "space-between" }}><div><div className="section-label">Deterministic checks</div><div className="muted tiny" style={{ marginTop: 4 }}>Evidence from {run.source === "demo" ? "the rendered task-list DOM" : "best-effort browser-fetched HTML"}</div></div><span className="mono muted tiny">{run.checks.filter(c => c.status === "PASS").length}/{run.checks.length} PASS</span></div>
       {run.checks.map((item, index) => <CheckCard item={item} index={index} key={`${item.name}-${index}`} />)}
     </section>
   </main>;

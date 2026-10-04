@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="dark">
+    <title>AgentVerify</title>
+    <link rel="stylesheet" href="popup.css">
+    <script type="module" src="dist/popup.js"></script>
+  </head>
+  <body>
+    <main class="shell">
+      <header class="header">
+        <div class="brand-mark" aria-hidden="true">A</div>
+        <div>
+          <p class="eyebrow">ACTIVE TAB / LOCAL INSPECTION</p>
+          <h1>AgentVerify</h1>
+        </div>
+      </header>
+
+      <p class="intro">Compare an agent's claim with the page currently open in this tab. The claim is context only; the verdict comes from page evidence.</p>
+
+      <form id="verify-form">
+        <label for="agent-claim">Agent Claim</label>
+        <textarea id="agent-claim" name="agentClaim" rows="2" maxlength="500" placeholder="What did the agent say it completed?" required></textarea>
+
+        <label for="required-text">Required Text</label>
+        <input id="required-text" name="requiredText" type="text" maxlength="300" placeholder="Text that must appear on the page" required>
+
+        <label for="forbidden-text">Forbidden Text <span class="optional">optional</span></label>
+        <input id="forbidden-text" name="forbiddenText" type="text" maxlength="300" placeholder="Text that must not appear">
+
+        <label for="expected-title">Expected Page Title <span class="optional">optional</span></label>
+        <input id="expected-title" name="expectedPageTitle" type="text" maxlength="300" placeholder="Exact title after normalization">
+
+        <label for="minimum-elements">Minimum Matching Elements</label>
+        <input id="minimum-elements" name="minimumMatchingElements" type="number" min="1" max="10000" step="1" value="1" required>
+        <p class="field-note">Counts visible, most-specific DOM elements containing Required Text. Nested wrappers are not double-counted.</p>
+
+        <p id="form-error" class="form-error" role="alert" hidden></p>
+        <button id="verify-button" type="submit">Verify Current Page</button>
+      </form>
+
+      <section id="result" aria-live="polite" aria-atomic="true" hidden></section>
+      <footer>Inspects the active tab directly. No page fetches or uploads.</footer>
+    </main>
+  </body>
+</html>
