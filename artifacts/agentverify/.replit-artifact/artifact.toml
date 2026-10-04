@@ -1,0 +1,28 @@
+kind = "web"
+previewPath = "/"
+title = "AgentVerify"
+description = "A developer-focused verification app that checks whether agent claims match observable outcomes, with deterministic contracts, evidence-backed receipts, and local demo workflows."
+version = "1.0.0"
+id = "artifacts/agentverify"
+router = "path"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 22840
+
+[services.development]
+run = "pnpm --filter @workspace/agentverify run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/agentverify", "run", "build" ]
+serve = "static"
+publicDir = "artifacts/agentverify/dist/public"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "22840"
+BASE_PATH = "/"

@@ -1,0 +1,1 @@
+- [AgentVerify product principles](agentverify-principles.md) — preserve evidence-based verdicts, local-first scope, and transparent browser inspection limits.
