@@ -17,7 +17,7 @@ The extension verifies claims against the rendered DOM of the page that is open 
 6. Open an ordinary webpage, such as `https://github.com/`, and click the AgentVerify extension icon.
 7. Fill in the claim and checks, then click **Verify Current Page**.
 
-After changing extension source files, run the build command again. TypeScript output is written to `extension/dist/`, which the popup loads.
+After changing extension source files, run the build command again. It generates `popup.js`, `content.js`, and `verifier.js` directly in the `extension/` folder. The popup imports the inspection function from `content.js` and injects it into the active tab only after you click **Verify Current Page**; it is not a persistent, all-sites content script.
 
 ## What is checked
 

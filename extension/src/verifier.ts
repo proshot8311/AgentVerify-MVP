@@ -1,4 +1,4 @@
-import type { PageSnapshot } from "./page-inspection.js";
+import type { PageSnapshot } from "./content.js";
 
 export interface VerificationInput {
   agentClaim: string;

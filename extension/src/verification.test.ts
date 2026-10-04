@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { inspectActivePage } from "./page-inspection.ts";
-import type { PageSnapshot } from "./page-inspection.ts";
+import { inspectActivePage } from "./content.ts";
+import type { PageSnapshot } from "./content.ts";
 import {
   createUnavailableResult,
   evaluateVerification,

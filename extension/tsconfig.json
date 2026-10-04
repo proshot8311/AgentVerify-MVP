@@ -8,9 +8,9 @@
     "skipLibCheck": true,
     "noEmitOnError": true,
     "rootDir": "src",
-    "outDir": "dist",
+    "outDir": ".",
     "types": []
   },
   "include": ["src/**/*.ts"],
-  "exclude": ["src/**/*.test.ts", "dist"]
+  "exclude": ["src/**/*.test.ts"]
 }

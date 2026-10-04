@@ -1,4 +1,4 @@
-import { inspectActivePage, type PageInspectionRequest, type PageSnapshot } from "./page-inspection.js";
+import { inspectActivePage, type PageInspectionRequest, type PageSnapshot } from "./content.js";
 import {
   createUnavailableResult,
   evaluateVerification,
