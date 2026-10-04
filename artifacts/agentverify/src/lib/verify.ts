@@ -1,5 +1,5 @@
 import type { Check, Contract, Run, Verdict } from "./store";
-import { makeId, saveRun } from "./store";
+import { makeId, saveRun } from "./store.ts";
 
 function verdictFor(checks: Check[]): Verdict {
   const passed = checks.filter(check => check.status === "PASS").length;
@@ -90,14 +90,25 @@ export async function verifyContract(contract: Contract): Promise<Run> {
   return run;
 }
 
-export function createDemoRun(boardName: string, taskList: HTMLElement, exists: boolean): Run {
+export function normalizeTaskText(value: string): string {
+  return value.replace(/\s+/g, " ").trim().toLowerCase();
+}
+
+export function createDemoRun(boardName: string, taskList: HTMLElement): Run {
   const claim = "Task 'Prepare ICSE Board Project' was created.";
   const phrase = "Prepare ICSE Board Project";
-  const matching = Array.from(taskList.querySelectorAll("[data-task-item]")).filter(el => (el.textContent || "").trim() === phrase);
+  const normalizedPhrase = normalizeTaskText(phrase);
+  const taskItems = Array.from(taskList.querySelectorAll<HTMLElement>("[data-task-item]"));
+  const matching = taskItems.filter(item => {
+    const taskText = item.querySelector("[data-task-text]")?.textContent ?? "";
+    return normalizeTaskText(taskText) === normalizedPhrase;
+  });
   const pass = matching.length > 0;
+  const unique = matching.length === 1;
+  const listId = taskList.getAttribute("data-testid") ?? "provided task list";
   const checks: Check[] = [
-    check("Required task", pass, `Task list contains exact task “${phrase}”`, pass ? `Found ${matching.length} matching task item(s)` : "Task item not found", `Queried rendered ${boardName} DOM at [data-testid="task-list"] and counted ${matching.length} [data-task-item] element(s) whose text equals ${JSON.stringify(phrase)}.${exists !== pass ? " The board state changed before verification." : ""}`),
-    check("Task item is unique", matching.length === 1, "Exactly 1 matching task item", `${matching.length} matching task item(s)`, `Counted exact-text matches among rendered [data-task-item] elements in the live task list.`),
+    check("Required task", pass, `Task list contains exact task “${phrase}” (case and whitespace normalized)`, pass ? `Found ${matching.length} matching task item(s)` : "Task item not found", `Queried rendered ${boardName} list ${JSON.stringify(listId)} for [data-task-item] entries and compared each nested [data-task-text] value after whitespace and casing normalization. Found ${matching.length} exact task match(es).`),
+    check("Task item is unique", unique, "Exactly 1 matching task item", `${matching.length} matching task item(s)`, `Counted normalized exact-text matches inside rendered list ${JSON.stringify(listId)}.`),
   ];
   const run: Run = {
     id: makeId(), timestamp: new Date().toISOString(),

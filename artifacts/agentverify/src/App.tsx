@@ -214,12 +214,12 @@ function DemoBoard({ title, withTask }: { title: string; withTask: boolean }) {
   function verify() {
     const list = listRef.current;
     if (!list) return;
-    const result = createDemoRun(title, list, withTask);
+    const result = createDemoRun(title, list);
     setRun(result);
   }
   return <section className="panel board" data-testid={`board-${withTask ? "with-task" : "without-task"}`}>
     <div className="board-top"><div><div className="eyebrow">{withTask ? "TARGET A / CLAIM HOLDS" : "TARGET B / CLAIM DOES NOT HOLD"}</div><h2 style={{ fontSize: 16, margin: "7px 0 0", letterSpacing: "-.04em" }}>{title}</h2></div><span className="status pending">FICTIONAL BOARD</span></div>
-    <div ref={listRef} className="task-list" data-testid="task-list" aria-label={`${title} task list`}>{tasks.map((task, index) => <div className="task-item" key={`${task}-${index}`} data-task-item data-testid={`task-item-${withTask ? "present" : "absent"}-${index}`}><span className="task-check"><Check size={13} /></span><span>{task}</span><span className="muted" style={{ marginLeft: "auto" }}>OPEN</span></div>)}</div>
+    <div ref={listRef} className="task-list" data-testid={`task-list-${withTask ? "present" : "absent"}`} aria-label={`${title} task list`}>{tasks.map((task, index) => <div className="task-item" key={`${task}-${index}`} data-task-item data-testid={`task-item-${withTask ? "present" : "absent"}-${index}`}><span className="task-check"><Check size={13} /></span><span data-task-text>{task}</span><span className="muted" style={{ marginLeft: "auto" }}>OPEN</span></div>)}</div>
     <div className="board-foot"><span>{tasks.length} rendered tasks · local DOM only</span><button type="button" onClick={verify} className="button primary small" data-testid={`button-verify-${withTask ? "present" : "absent"}`}><Radar size={13} />Verify claim</button></div>
     {run && <div className="panel" style={{ marginTop: 13, padding: 13, background: "#11161f" }} data-testid={`demo-result-${withTask ? "present" : "absent"}`}><div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}><Status verdict={run.verdict} /><Link href={`/results/${run.id}`} className="button ghost small" data-testid={`link-demo-result-${withTask ? "present" : "absent"}`}>Inspect evidence <ArrowRight size={12} /></Link></div><p className="muted tiny" style={{ lineHeight: 1.6, margin: "10px 0 0" }}>{run.observedOutcome} Persisted run ID <span className="mono">{run.id}</span>.</p></div>}
   </section>;
@@ -230,7 +230,7 @@ function Demo() {
     <Header eyebrow="Deterministic demo / fictional data" title="Same claim. Two outcomes." subtitle="Both fictional boards are rendered here. Verification queries each live task-list DOM and saves the observed result locally; no canned verdict is used." />
     <div className="panel panel-pad" style={{ marginTop: 22 }}><div className="eyebrow">AGENT CLAIM / IDENTICAL FOR BOTH BOARDS</div><div className="mono" style={{ color: "#e3e9ec", fontSize: 13, marginTop: 10 }} data-testid="demo-agent-claim">{claim}</div></div>
     <div className="demo-grid"><DemoBoard title="Northstar Tasks" withTask /><DemoBoard title="Fieldnotes Tasks" withTask={false} /></div>
-    <div className="callout" style={{ marginTop: 17 }}><Code2 size={13} style={{ verticalAlign: "-2px", marginRight: 6 }} />Evidence is collected from rendered <span className="mono">[data-task-item]</span> elements under each <span className="mono">[data-testid="task-list"]</span>. The absent board fails because no exact task node exists.</div>
+    <div className="callout" style={{ marginTop: 17 }}><Code2 size={13} style={{ verticalAlign: "-2px", marginRight: 6 }} />Evidence is collected from rendered <span className="mono">[data-task-item]</span> elements within each board's own task-list reference. The absent board fails because no normalized exact task-title match exists.</div>
   </main>;
 }
 function Router() {
