@@ -53,7 +53,7 @@ form { display: grid; gap: 7px; }
 label { margin-top: 5px; color: #c9d1dc; font-size: 11px; font-weight: 700; }
 .optional { margin-left: 4px; color: #778395; font-size: 10px; font-weight: 500; }
 
-input, textarea {
+input, textarea, select {
   width: 100%;
   border: 1px solid #303846;
   border-radius: 7px;
@@ -66,7 +66,7 @@ input, textarea {
 }
 
 textarea { resize: vertical; min-height: 54px; }
-input:focus, textarea:focus { border-color: #55c697; box-shadow: 0 0 0 2px #55c69724; }
+input:focus, textarea:focus, select:focus { border-color: #55c697; box-shadow: 0 0 0 2px #55c69724; }
 input::placeholder, textarea::placeholder { color: #677384; }
 .field-note { margin: -2px 0 3px; color: #8290a0; font-size: 10px; line-height: 1.45; }
 
@@ -111,7 +111,7 @@ button:disabled { cursor: wait; opacity: .65; }
 .check-heading { display: flex; justify-content: space-between; gap: 8px; font-size: 11px; font-weight: 700; }
 .check-status { font: 10px ui-monospace, SFMono-Regular, Menlo, monospace; }
 .check-status.pass { color: #65d6a6; }
-.check-status.fail, .check-status.not-checked { color: #ff8983; }
+.check-status.fail { color: #ff8983; }
 .check-status.skipped { color: #96a3b3; }
 .check p { margin: 6px 0 0; color: #aab4c1; font-size: 10px; line-height: 1.45; overflow-wrap: anywhere; }
 .check p strong { color: #d4dce6; }

@@ -19,24 +19,27 @@ The extension verifies claims against the rendered DOM of the page that is open 
 
 After changing extension source files, run the build command again. It generates `popup.js`, `content.js`, and `verifier.js` directly in the `extension/` folder. The popup imports the inspection function from `content.js` and injects it into the active tab only after you click **Verify Current Page**; it is not a persistent, all-sites content script.
 
-## What is checked
+## Contract checks
 
-- **Agent Claim** is retained in the popup report as context only; it does not affect the verdict.
-- **Required Text** must appear in the rendered body text.
-- **Forbidden Text** must be absent when configured.
-- **Expected Page Title** must match `document.title` when configured.
-- **Minimum Matching Elements** counts visible, most-specific DOM elements whose rendered text contains Required Text. Nested matching wrappers are not double-counted.
-- Text comparisons collapse whitespace and ignore letter casing.
+The **Agent Claim** is retained as context only; it does not affect the verdict. Configure one or more optional checks:
 
-Each check shows its expected value, observed result, and evidence read from the active tab. If Chrome refuses access to a page, checks are marked **NOT CHECKED** and the verdict is **FAILED**; the extension does not infer what the page contains.
+- **URL** compares the active tab's `window.location.href` using literal, case-sensitive **contains** or **exact** matching.
+- **Required Text** and **Forbidden Text** check rendered body text. Comparisons collapse whitespace and ignore letter casing.
+- **Exact Page Title** compares the entered value to `document.title` exactly, including case and whitespace.
+- **Minimum Matching Visible Elements** counts visible, most-specific DOM elements containing Required Text. Nested matching wrappers are not double-counted, and this check requires Required Text.
+- **CSS Selector Exists** passes only if at least one element matched by the selector is visible.
+- **CSS Selector Text** checks normalized rendered text on visible elements matched by the selector.
+- **Attribute / Value** checks the raw `getAttribute()` value on visible elements matched by the selector, using literal, case-sensitive **contains** or **exact** matching. For example, select `a[data-testid="created-order"]`, inspect `href`, and require it to contain `/orders/123`.
+
+Selector-based checks make it possible to target a specific control or result instead of relying on a generic word elsewhere on the page. Every result check reports **PASS**, **FAIL**, or **SKIPPED**, with its expected value, observed value, and evidence. Checks left blank are **SKIPPED**. If Chrome refuses active-tab access, configured checks are **SKIPPED**, the overall verdict is **FAILED**, and no page evidence is invented.
 
 ## Access limits
 
-The extension only inspects the active tab after you open its popup and click Verify. It has no broad website host permissions. Chrome can block extension scripts on protected pages such as `chrome://` pages and the Chrome Web Store; file URLs may require enabling **Allow access to file URLs** on the extension's details page. The extension reads the top-level page DOM, not cross-origin iframe contents.
+The extension only inspects the current active tab after you open its popup and click Verify. It queries that tab's DOM through `chrome.scripting.executeScript`; it never calls `fetch()` to inspect external websites and has no broad website host permissions. Chrome can block extension scripts on protected pages such as `chrome://` pages and the Chrome Web Store; file URLs may require enabling **Allow access to file URLs** on the extension's details page. The extension reads the top-level page DOM, not cross-origin iframe contents.
 
 The web dashboard's URL fetch is best-effort and can be blocked by CORS or other browser restrictions. Use this extension for direct inspection of an external page open in the active tab. It does not bypass CORS.
 
-## Checks
+## Local checks
 
 From the project root:
 

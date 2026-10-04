@@ -1,14 +1,30 @@
-import type { PageSnapshot } from "./content.js";
+import type {
+  AttributeMatchMode,
+  PageSnapshot,
+  SelectorInspection,
+  SelectorTextInspection,
+} from "./content.js";
+
+export type UrlMatchMode = "contains" | "exact";
 
 export interface VerificationInput {
   agentClaim: string;
+  expectedUrl: string;
+  urlMatchMode: UrlMatchMode;
   requiredText: string;
   forbiddenText: string;
   expectedPageTitle: string;
-  minimumMatchingElements: number;
+  minimumMatchingElements: number | null;
+  selectorExists: string;
+  selectorTextSelector: string;
+  selectorText: string;
+  attributeSelector: string;
+  attributeName: string;
+  attributeValue: string;
+  attributeMatchMode: AttributeMatchMode;
 }
 
-export type CheckStatus = "PASS" | "FAIL" | "SKIPPED" | "NOT CHECKED";
+export type CheckStatus = "PASS" | "FAIL" | "SKIPPED";
 
 export interface VerificationCheck {
   name: string;
@@ -30,130 +46,268 @@ export function normalizeForComparison(value: string): string {
   return value.replace(/\s+/g, " ").trim().toLowerCase();
 }
 
-function skippedCheck(name: string, reason: string): VerificationCheck {
+function skippedCheck(name: string, expected: string, reason: string): VerificationCheck {
+  return { name, status: "SKIPPED", expected, observed: "Skipped", evidence: reason };
+}
+
+function uninspectedCheck(name: string, expected: string, reason: string): VerificationCheck {
   return {
     name,
     status: "SKIPPED",
-    expected: "Optional check not configured",
-    observed: "Skipped",
-    evidence: reason,
+    expected,
+    observed: "Not inspected",
+    evidence: `The active tab could not be inspected: ${reason}. No page content was observed and no conclusion was inferred.`,
   };
 }
 
-function unavailableCheck(name: string, expected: string, reason: string): VerificationCheck {
-  return {
+function evaluatedCheck(
+  name: string,
+  expected: string,
+  passed: boolean,
+  observed: string,
+  evidence: string,
+): VerificationCheck {
+  return { name, status: passed ? "PASS" : "FAIL", expected, observed, evidence };
+}
+
+function describeSamples(samples: Array<{ tag: string; text: string }>): string {
+  return samples
+    .map(sample => `<${sample.tag}> ${JSON.stringify(sample.text)}`)
+    .join("; ");
+}
+
+function unavailableOrSkipped(
+  name: string,
+  expected: string,
+  configured: boolean,
+  reason: string,
+): VerificationCheck {
+  return configured
+    ? uninspectedCheck(name, expected, reason)
+    : skippedCheck(name, expected, "This optional check was not configured.");
+}
+
+function selectorErrorCheck(
+  name: string,
+  expected: string,
+  report: Pick<SelectorInspection | SelectorTextInspection, "selector" | "error">,
+): VerificationCheck | null {
+  if (!report.error) return null;
+  return evaluatedCheck(
     name,
-    status: "NOT CHECKED",
     expected,
-    observed: "Active-tab DOM was not inspected",
-    evidence: `Inspection unavailable: ${reason}. No page content was observed and no conclusion about this check was inferred.`,
-  };
+    false,
+    "The CSS selector could not be evaluated.",
+    `The active tab rejected CSS selector ${JSON.stringify(report.selector)}: ${report.error}. No matching page element was claimed.`,
+  );
+}
+
+function buildChecks(
+  input: VerificationInput,
+  snapshot: PageSnapshot | null,
+  unavailableReason = "",
+): VerificationCheck[] {
+  const checks: VerificationCheck[] = [];
+
+  const urlExpected = input.urlMatchMode === "exact"
+    ? `URL exactly equals ${JSON.stringify(input.expectedUrl)}`
+    : `URL contains ${JSON.stringify(input.expectedUrl)}`;
+  if (!input.expectedUrl) {
+    checks.push(skippedCheck("URL", urlExpected, "No expected URL was configured."));
+  } else if (!snapshot) {
+    checks.push(unavailableOrSkipped("URL", urlExpected, true, unavailableReason));
+  } else if (!snapshot.pageUrl) {
+    checks.push(skippedCheck("URL", urlExpected, "The active tab did not provide a URL to compare."));
+  } else {
+    const passed = input.urlMatchMode === "exact"
+      ? snapshot.pageUrl === input.expectedUrl
+      : snapshot.pageUrl.includes(input.expectedUrl);
+    checks.push(evaluatedCheck(
+      "URL",
+      urlExpected,
+      passed,
+      JSON.stringify(snapshot.pageUrl),
+      `Read window.location.href directly in the active tab. URL comparison is literal and case-sensitive.`,
+    ));
+  }
+
+  const requiredExpected = `Rendered page text contains ${JSON.stringify(input.requiredText)} (case and whitespace normalized)`;
+  if (!input.requiredText) {
+    checks.push(skippedCheck("Required Text", "Rendered page text contains the configured phrase.", "No Required Text was configured."));
+  } else if (!snapshot) {
+    checks.push(unavailableOrSkipped("Required Text", requiredExpected, true, unavailableReason));
+  } else if (!snapshot.bodyAvailable || snapshot.requiredTextFound === null) {
+    checks.push(skippedCheck("Required Text", requiredExpected, "The active tab did not expose rendered body text; no text conclusion was inferred."));
+  } else {
+    const passed = snapshot.requiredTextFound;
+    checks.push(evaluatedCheck(
+      "Required Text",
+      requiredExpected,
+      passed,
+      passed ? "Phrase found in rendered body text." : "Phrase not found in rendered body text.",
+      passed
+        ? `Inspected ${snapshot.renderedBodyTextLength} characters of active-tab body text. Normalized match context: ${JSON.stringify(snapshot.requiredTextExcerpt)}.`
+        : `Inspected ${snapshot.renderedBodyTextLength} characters of active-tab body text; the normalized phrase was absent.`,
+    ));
+  }
+
+  const forbiddenExpected = `Rendered page text does not contain ${JSON.stringify(input.forbiddenText)} (case and whitespace normalized)`;
+  if (!input.forbiddenText) {
+    checks.push(skippedCheck("Forbidden Text", "Rendered page text excludes the configured phrase.", "No Forbidden Text was configured."));
+  } else if (!snapshot) {
+    checks.push(unavailableOrSkipped("Forbidden Text", forbiddenExpected, true, unavailableReason));
+  } else if (!snapshot.bodyAvailable || snapshot.forbiddenTextFound === null) {
+    checks.push(skippedCheck("Forbidden Text", forbiddenExpected, "The active tab did not expose rendered body text; absence was not inferred."));
+  } else {
+    const found = snapshot.forbiddenTextFound;
+    checks.push(evaluatedCheck(
+      "Forbidden Text",
+      forbiddenExpected,
+      !found,
+      found ? "Forbidden phrase found in rendered body text." : "Forbidden phrase not found in rendered body text.",
+      found
+        ? `Inspected ${snapshot.renderedBodyTextLength} characters of active-tab body text. Normalized match context: ${JSON.stringify(snapshot.forbiddenTextExcerpt)}.`
+        : `Inspected ${snapshot.renderedBodyTextLength} characters of active-tab body text; the normalized forbidden phrase was absent.`,
+    ));
+  }
+
+  const titleExpected = `document.title exactly equals ${JSON.stringify(input.expectedPageTitle)}`;
+  if (!input.expectedPageTitle.trim()) {
+    checks.push(skippedCheck("Exact Page Title", "document.title exactly equals the configured title.", "No expected page title was configured."));
+  } else if (!snapshot) {
+    checks.push(unavailableOrSkipped("Exact Page Title", titleExpected, true, unavailableReason));
+  } else {
+    const passed = snapshot.pageTitle === input.expectedPageTitle;
+    checks.push(evaluatedCheck(
+      "Exact Page Title",
+      titleExpected,
+      passed,
+      JSON.stringify(snapshot.pageTitle),
+      `Read document.title directly in the active tab. Comparison is exact, including case and whitespace.`,
+    ));
+  }
+
+  const minimum = input.minimumMatchingElements;
+  const minimumExpected = `At least ${minimum ?? "the configured minimum"} visible, most-specific element(s) containing Required Text`;
+  if (minimum === null) {
+    checks.push(skippedCheck("Minimum Matching Visible Elements", "A minimum count of visible Required Text matches.", "No minimum matching element count was configured."));
+  } else if (!input.requiredText) {
+    checks.push(skippedCheck("Minimum Matching Visible Elements", minimumExpected, "Required Text is needed to define which visible elements to count."));
+  } else if (!snapshot) {
+    checks.push(unavailableOrSkipped("Minimum Matching Visible Elements", minimumExpected, true, unavailableReason));
+  } else if (!snapshot.bodyAvailable) {
+    checks.push(skippedCheck("Minimum Matching Visible Elements", minimumExpected, "The active tab did not expose a document body; no element count was inferred."));
+  } else {
+    const count = snapshot.matchingElementCount;
+    const examples = describeSamples(snapshot.matchingElementSamples);
+    checks.push(evaluatedCheck(
+      "Minimum Matching Visible Elements",
+      minimumExpected,
+      count >= minimum,
+      `${count} visible matching element(s).`,
+      `Counted ${count} visible, most-specific DOM element(s) whose rendered text contains the normalized Required Text. Nested matching wrappers are not double-counted.${examples ? ` Examples: ${examples}.` : " No matching visible element text was observed."}`,
+    ));
+  }
+
+  const selectorExistsExpected = `At least one visible DOM element matches CSS selector ${JSON.stringify(input.selectorExists)}`;
+  if (!input.selectorExists) {
+    checks.push(skippedCheck("CSS Selector Exists", "A visible page element matches the configured CSS selector.", "No existence selector was configured."));
+  } else if (!snapshot) {
+    checks.push(unavailableOrSkipped("CSS Selector Exists", selectorExistsExpected, true, unavailableReason));
+  } else {
+    const report = snapshot.selectorExistence;
+    const invalid = selectorErrorCheck("CSS Selector Exists", selectorExistsExpected, report);
+    if (invalid) {
+      checks.push(invalid);
+    } else {
+      const samples = describeSamples(report.visibleSamples);
+      checks.push(evaluatedCheck(
+        "CSS Selector Exists",
+        selectorExistsExpected,
+        report.visibleMatchCount > 0,
+        `${report.matchCount} DOM match(es), ${report.visibleMatchCount} visible.`,
+        `Ran document.querySelectorAll(${JSON.stringify(input.selectorExists)}) in the active tab. Only visible matches satisfy this check.${samples ? ` Visible samples: ${samples}.` : report.matchCount > 0 ? " DOM matches existed, but none were visible." : " No matching DOM element was observed."}`,
+      ));
+    }
+  }
+
+  const selectorTextExpected = `A visible element matching ${JSON.stringify(input.selectorTextSelector)} contains ${JSON.stringify(input.selectorText)} (case and whitespace normalized)`;
+  if (!input.selectorTextSelector && !input.selectorText) {
+    checks.push(skippedCheck("CSS Selector Text", "A selected visible element contains the configured text.", "No selector-text check was configured."));
+  } else if (!snapshot) {
+    checks.push(unavailableOrSkipped("CSS Selector Text", selectorTextExpected, true, unavailableReason));
+  } else {
+    const report = snapshot.selectorText;
+    const invalid = selectorErrorCheck("CSS Selector Text", selectorTextExpected, report);
+    if (invalid) {
+      checks.push(invalid);
+    } else {
+      const samples = describeSamples(report.matchingSamples);
+      checks.push(evaluatedCheck(
+        "CSS Selector Text",
+        selectorTextExpected,
+        report.matchingVisibleCount > 0,
+        `${report.matchingVisibleCount} visible selected element(s) contain the expected text; ${report.matchCount} DOM match(es) total.`,
+        `Compared rendered text from visible matches of ${JSON.stringify(input.selectorTextSelector)} in the active tab.${samples ? ` Matching elements: ${samples}.` : ` ${report.visibleMatchCount} selected element(s) were visible; none contained the expected text.`}`,
+      ));
+    }
+  }
+
+  const attributeExpected = `A visible element matching ${JSON.stringify(input.attributeSelector)} has raw ${JSON.stringify(input.attributeName)} attribute ${input.attributeMatchMode} ${JSON.stringify(input.attributeValue)}`;
+  if (!input.attributeSelector && !input.attributeName && !input.attributeValue) {
+    checks.push(skippedCheck("Attribute / Value", "A selected visible element has the configured attribute value.", "No attribute/value check was configured."));
+  } else if (!snapshot) {
+    checks.push(unavailableOrSkipped("Attribute / Value", attributeExpected, true, unavailableReason));
+  } else {
+    const report = snapshot.attributeValue;
+    const invalid = selectorErrorCheck("Attribute / Value", attributeExpected, report);
+    if (invalid) {
+      checks.push(invalid);
+    } else {
+      const values = report.valueSamples
+        .map(sample => `<${sample.tag}> ${input.attributeName}=${JSON.stringify(sample.value)} text=${JSON.stringify(sample.text)}`)
+        .join("; ");
+      checks.push(evaluatedCheck(
+        "Attribute / Value",
+        attributeExpected,
+        report.matchingVisibleCount > 0,
+        `${report.matchingVisibleCount} visible selected element(s) matched; ${report.matchCount} DOM match(es) total.`,
+        `Read the raw ${JSON.stringify(input.attributeName)} attribute with getAttribute() from visible matches of ${JSON.stringify(input.attributeSelector)} in the active tab. Comparison is literal and case-sensitive.${values ? ` Observed values: ${values}.` : " No visible attribute values were observed."}`,
+      ));
+    }
+  }
+
+  return checks;
+}
+
+function resultVerdict(checks: VerificationCheck[]): "VERIFIED" | "FAILED" {
+  const configuredChecks = checks.filter(check => check.status !== "SKIPPED");
+  return configuredChecks.length > 0 && configuredChecks.every(check => check.status === "PASS")
+    ? "VERIFIED"
+    : "FAILED";
 }
 
 export function createUnavailableResult(
   input: VerificationInput,
   reason: string,
 ): VerificationResult {
-  const checks: VerificationCheck[] = [
-    unavailableCheck("Required Text", `Rendered page contains “${input.requiredText}”`, reason),
-    input.forbiddenText.trim()
-      ? unavailableCheck("Forbidden Text", `Rendered page does not contain “${input.forbiddenText}”`, reason)
-      : skippedCheck("Forbidden Text", "No forbidden text was provided; no absence claim is made."),
-    input.expectedPageTitle.trim()
-      ? unavailableCheck("Page Title", `Title matches “${input.expectedPageTitle}”`, reason)
-      : skippedCheck("Page Title", "No expected page title was provided; no title claim is made."),
-    unavailableCheck(
-      "Minimum Matching Elements",
-      `At least ${input.minimumMatchingElements} visible matching element(s)`,
-      reason,
-    ),
-  ];
-  return { verdict: "FAILED", pageUrl: "", pageTitle: "", unavailableReason: reason, checks };
+  const checks = buildChecks(input, null, reason);
+  return {
+    verdict: "FAILED",
+    pageUrl: "",
+    pageTitle: "",
+    unavailableReason: reason,
+    checks,
+  };
 }
 
 export function evaluateVerification(
   input: VerificationInput,
   snapshot: PageSnapshot,
 ): VerificationResult {
-  const checks: VerificationCheck[] = [];
-  const unavailable = "The active tab did not expose a document body.";
-
-  if (!snapshot.bodyAvailable) {
-    checks.push(unavailableCheck("Required Text", `Rendered page contains “${input.requiredText}”`, unavailable));
-  } else {
-    const passed = snapshot.requiredTextFound;
-    checks.push({
-      name: "Required Text",
-      status: passed ? "PASS" : "FAIL",
-      expected: `Rendered page contains “${input.requiredText}” (case and whitespace normalized)`,
-      observed: passed ? "Required text found" : "Required text not found",
-      evidence: passed
-        ? `Inspected ${snapshot.renderedBodyTextLength} characters of rendered body text. Match context: ${JSON.stringify(snapshot.requiredTextExcerpt)}.`
-        : `Inspected ${snapshot.renderedBodyTextLength} characters of rendered body text; the normalized phrase was absent.`,
-    });
-  }
-
-  if (!input.forbiddenText.trim()) {
-    checks.push(skippedCheck("Forbidden Text", "No forbidden text was provided; no absence claim is made."));
-  } else if (!snapshot.bodyAvailable) {
-    checks.push(unavailableCheck("Forbidden Text", `Rendered page does not contain “${input.forbiddenText}”`, unavailable));
-  } else {
-    const found = snapshot.forbiddenTextFound === true;
-    checks.push({
-      name: "Forbidden Text",
-      status: found ? "FAIL" : "PASS",
-      expected: `Rendered page does not contain “${input.forbiddenText}” (case and whitespace normalized)`,
-      observed: found ? "Forbidden text found" : "Forbidden text not found",
-      evidence: found
-        ? `Inspected ${snapshot.renderedBodyTextLength} characters of rendered body text. Match context: ${JSON.stringify(snapshot.forbiddenTextExcerpt)}.`
-        : `Inspected ${snapshot.renderedBodyTextLength} characters of rendered body text; the normalized forbidden phrase was absent.`,
-    });
-  }
-
-  if (!input.expectedPageTitle.trim()) {
-    checks.push(skippedCheck("Page Title", "No expected page title was provided; no title claim is made."));
-  } else {
-    const passed =
-      normalizeForComparison(snapshot.pageTitle) ===
-      normalizeForComparison(input.expectedPageTitle);
-    checks.push({
-      name: "Page Title",
-      status: passed ? "PASS" : "FAIL",
-      expected: `“${input.expectedPageTitle}” (case and whitespace normalized)`,
-      observed: JSON.stringify(snapshot.pageTitle),
-      evidence: `Read document.title directly from the active tab: ${JSON.stringify(snapshot.pageTitle)}.`,
-    });
-  }
-
-  if (!snapshot.bodyAvailable) {
-    checks.push(
-      unavailableCheck(
-        "Minimum Matching Elements",
-        `At least ${input.minimumMatchingElements} visible matching element(s)`,
-        unavailable,
-      ),
-    );
-  } else {
-    const count = snapshot.matchingElementCount;
-    const passed = count >= input.minimumMatchingElements;
-    const examples = snapshot.matchingElementSamples
-      .map(sample => `<${sample.tag}> ${JSON.stringify(sample.text)}`)
-      .join("; ");
-    checks.push({
-      name: "Minimum Matching Elements",
-      status: passed ? "PASS" : "FAIL",
-      expected: `At least ${input.minimumMatchingElements} visible, most-specific element(s) containing Required Text`,
-      observed: `${count} matching element(s)`,
-      evidence: `Counted ${count} visible, most-specific DOM element(s) whose rendered text contains the normalized Required Text. Nested matching wrappers are not double-counted.${examples ? ` Examples from the page: ${examples}.` : " No matching visible element text was observed."}`,
-    });
-  }
-
-  const requiredChecksPassed = checks
-    .filter(check => check.status !== "SKIPPED")
-    .every(check => check.status === "PASS");
-
+  const checks = buildChecks(input, snapshot);
   return {
-    verdict: requiredChecksPassed ? "VERIFIED" : "FAILED",
+    verdict: resultVerdict(checks),
     pageUrl: snapshot.pageUrl,
     pageTitle: snapshot.pageTitle,
     unavailableReason: "",

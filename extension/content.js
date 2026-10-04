@@ -7,6 +7,10 @@ export function inspectActivePage(request) {
     function normalize(value) {
         return value.replace(/\s+/g, " ").trim().toLowerCase();
     }
+    function displayText(value) {
+        const collapsed = value.replace(/\s+/g, " ").trim();
+        return collapsed.length > 180 ? `${collapsed.slice(0, 177)}…` : collapsed;
+    }
     function isVisible(element) {
         if (element.getClientRects().length === 0)
             return false;
@@ -26,6 +30,16 @@ export function inspectActivePage(request) {
         }
         return true;
     }
+    function renderedText(element) {
+        const innerText = element.innerText;
+        return typeof innerText === "string" ? innerText : element.textContent ?? "";
+    }
+    function sample(element) {
+        return {
+            tag: element.tagName.toLowerCase(),
+            text: displayText(renderedText(element)),
+        };
+    }
     function excerpt(value, phrase) {
         const index = value.indexOf(phrase);
         if (index < 0)
@@ -34,11 +48,100 @@ export function inspectActivePage(request) {
         const end = Math.min(value.length, index + phrase.length + 75);
         return `${start > 0 ? "…" : ""}${value.slice(start, end)}${end < value.length ? "…" : ""}`;
     }
+    function querySelector(selector) {
+        if (!selector)
+            return { elements: [], error: "" };
+        try {
+            return { elements: Array.from(document.querySelectorAll(selector)), error: "" };
+        }
+        catch (error) {
+            return {
+                elements: [],
+                error: error instanceof Error ? error.message : String(error),
+            };
+        }
+    }
+    function inspectSelector(selector) {
+        const query = querySelector(selector);
+        const visible = query.elements.filter(isVisible);
+        return {
+            selector,
+            error: query.error,
+            matchCount: query.elements.length,
+            visibleMatchCount: visible.length,
+            visibleSamples: visible.slice(0, 5).map(sample),
+        };
+    }
+    function inspectSelectorText(selector, expectedText) {
+        const query = querySelector(selector);
+        const visible = query.elements.filter(isVisible);
+        const expected = normalize(expectedText);
+        const matching = expected
+            ? visible.filter(element => normalize(renderedText(element)).includes(expected))
+            : [];
+        return {
+            selector,
+            error: query.error,
+            matchCount: query.elements.length,
+            visibleMatchCount: visible.length,
+            visibleSamples: visible.slice(0, 5).map(sample),
+            matchingVisibleCount: matching.length,
+            matchingSamples: matching.slice(0, 5).map(sample),
+        };
+    }
+    function inspectAttribute(selector, attributeName, expectedValue, mode) {
+        const query = querySelector(selector);
+        const visible = query.elements.filter(isVisible);
+        const valueSamples = [];
+        let matchingVisibleCount = 0;
+        let error = query.error;
+        if (!error && attributeName) {
+            for (const element of visible) {
+                let value;
+                try {
+                    value = element.getAttribute(attributeName);
+                }
+                catch (attributeError) {
+                    error = attributeError instanceof Error ? attributeError.message : String(attributeError);
+                    break;
+                }
+                const matches = value !== null && expectedValue !== "" && (mode === "exact" ? value === expectedValue : value.includes(expectedValue));
+                const item = {
+                    tag: element.tagName.toLowerCase(),
+                    text: displayText(renderedText(element)),
+                    value: value === null
+                        ? null
+                        : value.length > 180
+                            ? `${value.slice(0, 177)}…`
+                            : value,
+                };
+                if (valueSamples.length < 5)
+                    valueSamples.push(item);
+                if (matches)
+                    matchingVisibleCount += 1;
+            }
+        }
+        const matchingSamples = valueSamples.filter(item => {
+            if (item.value === null || expectedValue === "")
+                return false;
+            return mode === "exact" ? item.value === expectedValue : item.value.includes(expectedValue);
+        });
+        return {
+            selector,
+            error,
+            matchCount: query.elements.length,
+            visibleMatchCount: visible.length,
+            attributeName,
+            matchingVisibleCount,
+            valueSamples,
+            matchingSamples,
+        };
+    }
     const body = document.body;
     const bodyText = body?.innerText ?? body?.textContent ?? "";
     const normalizedBody = normalize(bodyText);
-    const required = normalize(request.requiredText);
-    const forbidden = normalize(request.forbiddenText);
+    const required = normalize(request.requiredText ?? "");
+    const forbidden = normalize(request.forbiddenText ?? "");
     const requiredIndex = required ? normalizedBody.indexOf(required) : -1;
     const forbiddenIndex = forbidden ? normalizedBody.indexOf(forbidden) : -1;
     const elements = body
@@ -49,7 +152,7 @@ export function inspectActivePage(request) {
     for (const element of elements) {
         if (!isVisible(element))
             continue;
-        const text = normalize(element.innerText ?? element.textContent ?? "");
+        const text = normalize(renderedText(element));
         normalizedElementText.set(element, text);
         if (required && text.includes(required))
             matchingElements.add(element);
@@ -67,12 +170,13 @@ export function inspectActivePage(request) {
         matchingBelow.set(element, matchesHere || hasMatchingChild);
     }
     countedElements.reverse();
+    const attributeMode = request.attributeMatchMode === "exact" ? "exact" : "contains";
     return {
         pageUrl: window.location.href,
         pageTitle: document.title,
         bodyAvailable: body !== null,
         renderedBodyTextLength: bodyText.length,
-        requiredTextFound: requiredIndex >= 0,
+        requiredTextFound: required ? requiredIndex >= 0 : null,
         requiredTextExcerpt: requiredIndex >= 0 ? excerpt(normalizedBody, required) : "",
         forbiddenTextFound: forbidden ? forbiddenIndex >= 0 : null,
         forbiddenTextExcerpt: forbiddenIndex >= 0 ? excerpt(normalizedBody, forbidden) : "",
@@ -81,5 +185,8 @@ export function inspectActivePage(request) {
             tag: element.tagName.toLowerCase(),
             text: normalizedElementText.get(element) ?? "",
         })),
+        selectorExistence: inspectSelector(request.selectorExists ?? ""),
+        selectorText: inspectSelectorText(request.selectorTextSelector ?? "", request.selectorText ?? ""),
+        attributeValue: inspectAttribute(request.attributeSelector ?? "", request.attributeName ?? "", request.attributeValue ?? "", attributeMode),
     };
 }

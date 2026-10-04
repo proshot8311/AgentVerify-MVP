@@ -1,7 +1,12 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { inspectActivePage } from "./content.ts";
-import type { PageSnapshot } from "./content.ts";
+import type {
+  AttributeInspection,
+  PageSnapshot,
+  SelectorInspection,
+  SelectorTextInspection,
+} from "./content.ts";
 import {
   createUnavailableResult,
   evaluateVerification,
@@ -15,7 +20,7 @@ interface MockElement {
   children: MockElement[];
   parentElement: MockElement | null;
   visible: boolean;
-  ariaHidden: boolean;
+  attributes: Record<string, string>;
   getClientRects(): Array<object>;
   getAttribute(name: string): string | null;
   querySelectorAll(selector: string): MockElement[];
@@ -25,7 +30,7 @@ function makeElement(
   tagName: string,
   text: string,
   children: MockElement[] = [],
-  options: { visible?: boolean; ariaHidden?: boolean } = {},
+  options: { visible?: boolean; attributes?: Record<string, string> } = {},
 ): MockElement {
   const element: MockElement = {
     tagName: tagName.toUpperCase(),
@@ -34,12 +39,12 @@ function makeElement(
     children,
     parentElement: null,
     visible: options.visible ?? true,
-    ariaHidden: options.ariaHidden ?? false,
+    attributes: options.attributes ?? {},
     getClientRects() {
       return this.visible ? [{}] : [];
     },
     getAttribute(name: string) {
-      return name === "aria-hidden" && this.ariaHidden ? "true" : null;
+      return this.attributes[name] ?? null;
     },
     querySelectorAll(selector: string) {
       if (selector !== "*") return [];
@@ -52,15 +57,83 @@ function makeElement(
   return element;
 }
 
+function installMockPage(options: {
+  body: MockElement | null;
+  title?: string;
+  url?: string;
+  selectorMatches?: Record<string, MockElement[]>;
+}): () => void {
+  const originalWindow = Object.getOwnPropertyDescriptor(globalThis, "window");
+  const originalDocument = Object.getOwnPropertyDescriptor(globalThis, "document");
+
+  Object.defineProperty(globalThis, "window", {
+    configurable: true,
+    value: {
+      location: { href: options.url ?? "https://github.com/example/repo/issues" },
+      getComputedStyle: (element: MockElement) => ({
+        display: element.visible ? "block" : "none",
+        visibility: "visible",
+        opacity: "1",
+      }),
+    },
+  });
+  Object.defineProperty(globalThis, "document", {
+    configurable: true,
+    value: {
+      body: options.body,
+      title: options.title ?? "Repository · Issues",
+      querySelectorAll: (selector: string) => options.selectorMatches?.[selector] ?? [],
+    },
+  });
+
+  return () => {
+    if (originalWindow) Object.defineProperty(globalThis, "window", originalWindow);
+    else Reflect.deleteProperty(globalThis, "window");
+    if (originalDocument) Object.defineProperty(globalThis, "document", originalDocument);
+    else Reflect.deleteProperty(globalThis, "document");
+  };
+}
+
+const emptySelector: SelectorInspection = {
+  selector: "",
+  error: "",
+  matchCount: 0,
+  visibleMatchCount: 0,
+  visibleSamples: [],
+};
+
+const emptySelectorText: SelectorTextInspection = {
+  ...emptySelector,
+  matchingVisibleCount: 0,
+  matchingSamples: [],
+};
+
+const emptyAttribute: AttributeInspection = {
+  ...emptySelector,
+  attributeName: "",
+  matchingVisibleCount: 0,
+  valueSamples: [],
+  matchingSamples: [],
+};
+
 const baseInput: VerificationInput = {
   agentClaim: "The issue was created.",
+  expectedUrl: "",
+  urlMatchMode: "contains",
   requiredText: "Issue created",
   forbiddenText: "",
   expectedPageTitle: "Repository · Issues",
   minimumMatchingElements: 1,
+  selectorExists: "",
+  selectorTextSelector: "",
+  selectorText: "",
+  attributeSelector: "",
+  attributeName: "",
+  attributeValue: "",
+  attributeMatchMode: "contains",
 };
 
-function snapshot(overrides: Partial<PageSnapshot> = {}): PageSnapshot {
+function pageSnapshot(overrides: Partial<PageSnapshot> = {}): PageSnapshot {
   return {
     pageUrl: "https://github.com/example/repo/issues",
     pageTitle: "Repository · Issues",
@@ -72,82 +145,228 @@ function snapshot(overrides: Partial<PageSnapshot> = {}): PageSnapshot {
     forbiddenTextExcerpt: "",
     matchingElementCount: 1,
     matchingElementSamples: [{ tag: "span", text: "issue created" }],
+    selectorExistence: emptySelector,
+    selectorText: emptySelectorText,
+    attributeValue: emptyAttribute,
     ...overrides,
   };
 }
 
-test("inspects rendered page text and avoids counting nested wrappers twice", () => {
+test("inspects active-tab DOM text, visible counts, and action-specific selector attributes without fetching", () => {
+  const createdButton = makeElement("button", "Issue #123 CREATED", [], {
+    attributes: { "data-testid": "created-issue", "data-state": "complete" },
+  });
+  const issueLink = makeElement("a", "View issue", [], {
+    attributes: { "data-testid": "created-issue-link", href: "/issues/123" },
+  });
+  const hiddenTemplate = makeElement("div", "Issue #123 created", [], { visible: false });
+  const body = makeElement("body", "Issue #123 created. View issue.", [
+    createdButton,
+    issueLink,
+    hiddenTemplate,
+  ]);
+  const restorePage = installMockPage({
+    body,
+    selectorMatches: {
+      '[data-testid="created-issue"]': [createdButton],
+      '[data-testid="created-issue-link"]': [issueLink],
+      "#hidden-template": [hiddenTemplate],
+    },
+  });
+
+  const originalFetch = Object.getOwnPropertyDescriptor(globalThis, "fetch");
+  let fetchCalled = false;
+  Object.defineProperty(globalThis, "fetch", {
+    configurable: true,
+    writable: true,
+    value: () => {
+      fetchCalled = true;
+      throw new Error("External fetch must not be used for tab inspection.");
+    },
+  });
+
+  try {
+    const observed = inspectActivePage({
+      requiredText: "issue #123 created",
+      forbiddenText: "permission denied",
+      selectorExists: '[data-testid="created-issue"]',
+      selectorTextSelector: '[data-testid="created-issue"]',
+      selectorText: " issue #123   created ",
+      attributeSelector: '[data-testid="created-issue-link"]',
+      attributeName: "href",
+      attributeValue: "/issues/123",
+      attributeMatchMode: "contains",
+    });
+
+    assert.equal(observed.requiredTextFound, true);
+    assert.equal(observed.forbiddenTextFound, false);
+    assert.equal(observed.matchingElementCount, 1);
+    assert.equal(observed.selectorExistence.visibleMatchCount, 1);
+    assert.equal(observed.selectorText.matchingVisibleCount, 1);
+    assert.equal(observed.attributeValue.matchingVisibleCount, 1);
+    assert.equal(observed.attributeValue.valueSamples[0]?.value, "/issues/123");
+    assert.equal(observed.pageUrl, "https://github.com/example/repo/issues");
+
+    const hiddenSelector = inspectActivePage({ selectorExists: "#hidden-template" });
+    assert.equal(hiddenSelector.selectorExistence.matchCount, 1);
+    assert.equal(hiddenSelector.selectorExistence.visibleMatchCount, 0);
+    assert.equal(fetchCalled, false);
+  } finally {
+    restorePage();
+    if (originalFetch) Object.defineProperty(globalThis, "fetch", originalFetch);
+    else Reflect.deleteProperty(globalThis, "fetch");
+  }
+});
+
+test("keeps rendered text comparisons normalized and excludes hidden nested matches", () => {
   const text = makeElement("span", "  ISSUE\n created ");
   const button = makeElement("button", "  ISSUE\n created ", [text]);
   const hidden = makeElement("div", "private marker", [], { visible: false });
   const body = makeElement("body", "Issue created", [button, hidden]);
-  const originalWindow = Object.getOwnPropertyDescriptor(globalThis, "window");
-  const originalDocument = Object.getOwnPropertyDescriptor(globalThis, "document");
-
-  Object.defineProperty(globalThis, "window", {
-    configurable: true,
-    value: {
-      location: { href: "https://github.com/example/repo/issues" },
-      getComputedStyle: (element: MockElement) => ({
-        display: element.visible ? "block" : "none",
-        visibility: "visible",
-        opacity: "1",
-      }),
-    },
-  });
-  Object.defineProperty(globalThis, "document", {
-    configurable: true,
-    value: { body, title: "Repository · Issues" },
-  });
+  const restorePage = installMockPage({ body });
 
   try {
-    const observed = inspectActivePage({ requiredText: "issue created", forbiddenText: "private marker" });
+    const observed = inspectActivePage({
+      requiredText: "issue created",
+      forbiddenText: "private marker",
+    });
     assert.equal(observed.requiredTextFound, true);
     assert.equal(observed.forbiddenTextFound, false);
     assert.equal(observed.matchingElementCount, 1);
     assert.equal(observed.matchingElementSamples[0]?.tag, "span");
-    assert.equal(observed.pageUrl, "https://github.com/example/repo/issues");
   } finally {
-    if (originalWindow) Object.defineProperty(globalThis, "window", originalWindow);
-    else Reflect.deleteProperty(globalThis, "window");
-    if (originalDocument) Object.defineProperty(globalThis, "document", originalDocument);
-    else Reflect.deleteProperty(globalThis, "document");
+    restorePage();
   }
 });
 
-test("normalizes casing and whitespace and verifies every configured check", () => {
+test("checks URL contains literally and exact URL/title without case or whitespace normalization", () => {
   const input = {
     ...baseInput,
-    requiredText: "  ISSUE  created ",
-    expectedPageTitle: " repository ·   ISSUES ",
-    minimumMatchingElements: 1,
+    expectedUrl: "https://github.com/example/repo/issues",
+    expectedPageTitle: "repository · Issues",
   };
+  const withQuery = pageSnapshot({
+    pageUrl: "https://github.com/example/repo/issues?state=open",
+  });
 
-  const result = evaluateVerification(input, snapshot({
-    pageTitle: "Repository · Issues",
-    requiredTextExcerpt: "New issue was created",
-    matchingElementCount: 2,
-    matchingElementSamples: [
-      { tag: "span", text: "issue created" },
-      { tag: "button", text: "issue created" },
-    ],
+  const containsResult = evaluateVerification({ ...input, urlMatchMode: "contains" }, withQuery);
+  const exactResult = evaluateVerification({ ...input, urlMatchMode: "exact" }, withQuery);
+
+  assert.equal(containsResult.checks.find(check => check.name === "URL")?.status, "PASS");
+  assert.equal(exactResult.checks.find(check => check.name === "URL")?.status, "FAIL");
+  assert.equal(exactResult.checks.find(check => check.name === "Exact Page Title")?.status, "FAIL");
+  assert.equal(exactResult.checks.find(check => check.name === "Exact Page Title")?.observed, '"Repository · Issues"');
+});
+
+test("verifies a specific action using a visible control, its text, and a raw href value", () => {
+  const input: VerificationInput = {
+    ...baseInput,
+    requiredText: "",
+    expectedPageTitle: "",
+    minimumMatchingElements: null,
+    selectorExists: 'button[data-testid="create-issue"]',
+    selectorTextSelector: 'button[data-testid="create-issue"]',
+    selectorText: "Issue #123 created",
+    attributeSelector: 'a[data-testid="created-issue"]',
+    attributeName: "href",
+    attributeValue: "/issues/123",
+    attributeMatchMode: "contains",
+  };
+  const result = evaluateVerification(input, pageSnapshot({
+    selectorExistence: {
+      selector: input.selectorExists,
+      error: "",
+      matchCount: 1,
+      visibleMatchCount: 1,
+      visibleSamples: [{ tag: "button", text: "Issue #123 created" }],
+    },
+    selectorText: {
+      selector: input.selectorTextSelector,
+      error: "",
+      matchCount: 1,
+      visibleMatchCount: 1,
+      matchingVisibleCount: 1,
+      visibleSamples: [{ tag: "button", text: "Issue #123 created" }],
+      matchingSamples: [{ tag: "button", text: "Issue #123 created" }],
+    },
+    attributeValue: {
+      selector: input.attributeSelector,
+      error: "",
+      matchCount: 1,
+      visibleMatchCount: 1,
+      attributeName: "href",
+      matchingVisibleCount: 1,
+      valueSamples: [{ tag: "a", text: "View issue", value: "/issues/123" }],
+      matchingSamples: [{ tag: "a", text: "View issue", value: "/issues/123" }],
+    },
   }));
 
   assert.equal(result.verdict, "VERIFIED");
-  assert.equal(result.checks.length, 4);
-  assert.ok(result.checks.every(check => check.status === "PASS" || check.status === "SKIPPED"));
-  assert.match(result.checks[0].evidence, /New issue was created/);
-  assert.match(result.checks[3].evidence, /nested matching wrappers are not double-counted/i);
+  assert.equal(result.checks.find(check => check.name === "CSS Selector Exists")?.status, "PASS");
+  assert.equal(result.checks.find(check => check.name === "CSS Selector Text")?.status, "PASS");
+  const attributeCheck = result.checks.find(check => check.name === "Attribute / Value");
+  assert.equal(attributeCheck?.status, "PASS");
+  assert.match(attributeCheck?.evidence ?? "", /getAttribute/);
+  assert.ok(result.checks.every(check => ["PASS", "FAIL", "SKIPPED"].includes(check.status)));
 });
 
-test("fails when required evidence is absent, forbidden text is present, or count is too low", () => {
+test("fails selector checks for hidden-only elements and reports invalid CSS selectors explicitly", () => {
+  const input: VerificationInput = {
+    ...baseInput,
+    requiredText: "",
+    expectedPageTitle: "",
+    minimumMatchingElements: null,
+    selectorExists: "#hidden",
+    selectorTextSelector: "#hidden",
+    selectorText: "success",
+  };
+  const result = evaluateVerification(input, pageSnapshot({
+    selectorExistence: {
+      selector: "#hidden",
+      error: "",
+      matchCount: 1,
+      visibleMatchCount: 0,
+      visibleSamples: [],
+    },
+    selectorText: {
+      selector: "#hidden",
+      error: "",
+      matchCount: 1,
+      visibleMatchCount: 0,
+      matchingVisibleCount: 0,
+      visibleSamples: [],
+      matchingSamples: [],
+    },
+  }));
+
+  assert.equal(result.checks.find(check => check.name === "CSS Selector Exists")?.status, "FAIL");
+  assert.equal(result.checks.find(check => check.name === "CSS Selector Text")?.status, "FAIL");
+
+  const invalid = evaluateVerification(
+    { ...input, selectorTextSelector: "", selectorText: "", selectorExists: "[" },
+    pageSnapshot({
+      selectorExistence: {
+        selector: "[",
+        error: "Invalid selector",
+        matchCount: 0,
+        visibleMatchCount: 0,
+        visibleSamples: [],
+      },
+    }),
+  );
+  const invalidCheck = invalid.checks.find(check => check.name === "CSS Selector Exists");
+  assert.equal(invalidCheck?.status, "FAIL");
+  assert.match(invalidCheck?.evidence ?? "", /rejected CSS selector/);
+});
+
+test("fails when required text is absent, forbidden text is present, or minimum count is too low", () => {
   const result = evaluateVerification(
     {
       ...baseInput,
       forbiddenText: "permission denied",
       minimumMatchingElements: 2,
     },
-    snapshot({
+    pageSnapshot({
       requiredTextFound: false,
       requiredTextExcerpt: "",
       forbiddenTextFound: true,
@@ -158,17 +377,37 @@ test("fails when required evidence is absent, forbidden text is present, or coun
   );
 
   assert.equal(result.verdict, "FAILED");
-  assert.deepEqual(result.checks.map(check => check.status), ["FAIL", "FAIL", "PASS", "FAIL"]);
-  assert.match(result.checks[1].evidence, /permission denied/);
+  assert.equal(result.checks.find(check => check.name === "Required Text")?.status, "FAIL");
+  assert.equal(result.checks.find(check => check.name === "Forbidden Text")?.status, "FAIL");
+  assert.equal(result.checks.find(check => check.name === "Minimum Matching Visible Elements")?.status, "FAIL");
 });
 
-test("reports unavailable inspection without inventing page evidence", () => {
-  const result = createUnavailableResult(
+test("uses SKIPPED for unconfigured checks and unavailable active-tab inspection without inventing evidence", () => {
+  const unavailable = createUnavailableResult(
     { ...baseInput, forbiddenText: "permission denied" },
     "Chrome blocked script injection on this page",
   );
 
+  assert.equal(unavailable.verdict, "FAILED");
+  assert.equal(unavailable.checks.length, 8);
+  assert.ok(unavailable.checks.every(check => check.status === "SKIPPED"));
+  assert.ok(unavailable.checks.every(check => /No page content was observed|not configured|No expected|No Required|No Forbidden|No minimum|No selector|No existence selector|No attribute/i.test(check.evidence)));
+  assert.equal(new Set(unavailable.checks.map(check => check.status)).size, 1);
+});
+
+test("does not return a verified verdict when every optional check is skipped", () => {
+  const input = {
+    ...baseInput,
+    expectedUrl: "",
+    requiredText: "",
+    forbiddenText: "",
+    expectedPageTitle: "",
+    minimumMatchingElements: null,
+  };
+  const result = evaluateVerification(input, pageSnapshot({
+    requiredTextFound: null,
+    forbiddenTextFound: null,
+  }));
   assert.equal(result.verdict, "FAILED");
-  assert.ok(result.checks.every(check => check.status === "NOT CHECKED"));
-  assert.ok(result.checks.every(check => /No page content was observed/.test(check.evidence)));
+  assert.ok(result.checks.every(check => check.status === "SKIPPED"));
 });

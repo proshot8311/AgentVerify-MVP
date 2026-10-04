@@ -37,29 +37,98 @@ const resultRegion = requireElement<HTMLElement>("#result");
 const formError = requireElement<HTMLElement>("#form-error");
 const verifyButton = requireElement<HTMLButtonElement>("#verify-button");
 
-function fieldValue(name: string): string {
+function rawFieldValue(name: string): string {
   const field = form.elements.namedItem(name);
-  return field instanceof HTMLInputElement || field instanceof HTMLTextAreaElement
-    ? field.value.trim()
+  return field instanceof HTMLInputElement ||
+    field instanceof HTMLTextAreaElement ||
+    field instanceof HTMLSelectElement
+    ? field.value
     : "";
 }
 
-function collectInput(): VerificationInput {
-  const minimumValue = Number(fieldValue("minimumMatchingElements"));
-  if (!Number.isInteger(minimumValue) || minimumValue < 1 || minimumValue > 10000) {
-    throw new Error("Minimum Matching Elements must be a whole number from 1 to 10,000.");
-  }
-
-  return {
-    agentClaim: fieldValue("agentClaim"),
-    requiredText: fieldValue("requiredText"),
-    forbiddenText: fieldValue("forbiddenText"),
-    expectedPageTitle: fieldValue("expectedPageTitle"),
-    minimumMatchingElements: minimumValue,
-  };
+function fieldValue(name: string): string {
+  return rawFieldValue(name).trim();
 }
 
-function appendText(parent: HTMLElement, tag: "p" | "strong" | "span" | "h2", className: string, text: string): HTMLElement {
+function collectInput(): VerificationInput {
+  const urlMatchMode = fieldValue("urlMatchMode");
+  if (urlMatchMode !== "contains" && urlMatchMode !== "exact") {
+    throw new Error("Choose Contains or Exact URL for the URL check.");
+  }
+
+  const attributeMatchMode = fieldValue("attributeMatchMode");
+  if (attributeMatchMode !== "contains" && attributeMatchMode !== "exact") {
+    throw new Error("Choose Contains or Exact value for the attribute check.");
+  }
+
+  const requiredText = fieldValue("requiredText");
+  const minimumRaw = fieldValue("minimumMatchingElements");
+  let minimumMatchingElements: number | null = null;
+  if (minimumRaw) {
+    const minimumValue = Number(minimumRaw);
+    if (!Number.isInteger(minimumValue) || minimumValue < 1 || minimumValue > 10000) {
+      throw new Error("Minimum Matching Elements must be a whole number from 1 to 10,000.");
+    }
+    if (!requiredText) {
+      throw new Error("Enter Required Text to define which elements the minimum count should match.");
+    }
+    minimumMatchingElements = minimumValue;
+  }
+
+  const selectorTextSelector = fieldValue("selectorTextSelector");
+  const selectorText = fieldValue("selectorText");
+  if (Boolean(selectorTextSelector) !== Boolean(selectorText)) {
+    throw new Error("For CSS Selector Text, enter both a selector and the text to find.");
+  }
+
+  const attributeSelector = fieldValue("attributeSelector");
+  const attributeName = fieldValue("attributeName");
+  const attributeValue = rawFieldValue("attributeValue");
+  const hasAttributeCheck = Boolean(attributeSelector || attributeName || attributeValue);
+  if (
+    hasAttributeCheck &&
+    (!attributeSelector || !attributeName || attributeValue.length === 0)
+  ) {
+    throw new Error("For Attribute / Value, enter a selector, attribute name, and expected value.");
+  }
+  if (attributeName && !/^[A-Za-z_:][A-Za-z0-9:._-]*$/.test(attributeName)) {
+    throw new Error("Enter a valid attribute name, such as href, aria-label, or data-state.");
+  }
+
+  const input: VerificationInput = {
+    agentClaim: fieldValue("agentClaim"),
+    expectedUrl: fieldValue("expectedUrl"),
+    urlMatchMode,
+    requiredText,
+    forbiddenText: fieldValue("forbiddenText"),
+    expectedPageTitle: rawFieldValue("expectedPageTitle"),
+    minimumMatchingElements,
+    selectorExists: fieldValue("selectorExists"),
+    selectorTextSelector,
+    selectorText,
+    attributeSelector,
+    attributeName,
+    attributeValue,
+    attributeMatchMode,
+  };
+
+  const hasConfiguredCheck = Boolean(
+    input.expectedUrl ||
+      input.requiredText ||
+      input.forbiddenText ||
+      input.expectedPageTitle.trim() ||
+      input.minimumMatchingElements !== null ||
+      input.selectorExists ||
+      input.selectorTextSelector ||
+      input.attributeSelector,
+  );
+  if (!hasConfiguredCheck) throw new Error("Configure at least one contract check.");
+  if (!input.agentClaim) throw new Error("Enter the Agent Claim.");
+
+  return input;
+}
+
+function createText(parent: HTMLElement, tag: "p" | "strong" | "span" | "h2", className: string, text: string): HTMLElement {
   const child = document.createElement(tag);
   child.className = className;
   child.textContent = text;
@@ -73,13 +142,13 @@ function renderCheck(check: VerificationCheck): HTMLElement {
 
   const heading = document.createElement("div");
   heading.className = "check-heading";
-  appendText(heading, "span", "", check.name);
-  appendText(heading, "span", `check-status ${check.status.toLowerCase().replace(/\s+/g, "-")}`, check.status);
+  createText(heading, "span", "", check.name);
+  createText(heading, "span", `check-status ${check.status.toLowerCase()}`, check.status);
   card.append(heading);
 
-  appendText(card, "p", "", `Expected: ${check.expected}`);
-  appendText(card, "p", "", `Observed: ${check.observed}`);
-  const evidence = appendText(card, "p", "", "");
+  createText(card, "p", "", `Expected: ${check.expected}`);
+  createText(card, "p", "", `Observed: ${check.observed}`);
+  const evidence = createText(card, "p", "", "");
   const label = document.createElement("strong");
   label.textContent = "Evidence: ";
   evidence.append(label, document.createTextNode(check.evidence));
@@ -92,7 +161,7 @@ function renderResult(input: VerificationInput, result: VerificationResult): voi
 
   const top = document.createElement("div");
   top.className = "result-top";
-  const verdict = appendText(
+  const verdict = createText(
     top,
     "h2",
     `verdict ${result.verdict === "VERIFIED" ? "verified" : "failed"}`,
@@ -101,7 +170,7 @@ function renderResult(input: VerificationInput, result: VerificationResult): voi
   verdict.setAttribute("aria-label", `Verdict: ${result.verdict}`);
   resultRegion.append(top);
 
-  appendText(
+  createText(
     resultRegion,
     "p",
     "result-page",
@@ -116,11 +185,11 @@ function renderResult(input: VerificationInput, result: VerificationResult): voi
   resultRegion.append(claim);
 
   if (result.unavailableReason) {
-    appendText(
+    createText(
       resultRegion,
       "p",
       "form-error",
-      `Inspection unavailable: ${result.unavailableReason}. The verdict is FAILED because the page could not be checked; no page content was inferred.`,
+      `Inspection unavailable: ${result.unavailableReason}. The verdict is FAILED because the contract could not be checked; no page content was inferred.`,
     );
   }
 
@@ -140,8 +209,6 @@ form.addEventListener("submit", async event => {
   let input: VerificationInput;
   try {
     input = collectInput();
-    if (!input.agentClaim) throw new Error("Enter the Agent Claim.");
-    if (!input.requiredText) throw new Error("Enter Required Text to verify.");
   } catch (error) {
     formError.textContent = error instanceof Error ? error.message : "Check the verification fields.";
     formError.hidden = false;
@@ -158,6 +225,13 @@ form.addEventListener("submit", async event => {
     const request: PageInspectionRequest = {
       requiredText: input.requiredText,
       forbiddenText: input.forbiddenText,
+      selectorExists: input.selectorExists,
+      selectorTextSelector: input.selectorTextSelector,
+      selectorText: input.selectorText,
+      attributeSelector: input.attributeSelector,
+      attributeName: input.attributeName,
+      attributeValue: input.attributeValue,
+      attributeMatchMode: input.attributeMatchMode,
     };
     const executions = await chrome.scripting.executeScript({
       target: { tabId: tab.id },

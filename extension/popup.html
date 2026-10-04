@@ -24,18 +24,46 @@
         <label for="agent-claim">Agent Claim</label>
         <textarea id="agent-claim" name="agentClaim" rows="2" maxlength="500" placeholder="What did the agent say it completed?" required></textarea>
 
-        <label for="required-text">Required Text</label>
-        <input id="required-text" name="requiredText" type="text" maxlength="300" placeholder="Text that must appear on the page" required>
+        <p class="field-note">Configure one or more checks. For action-specific proof, target a concrete control or result with a CSS selector and verify its text or attribute.</p>
+
+        <label for="url-match-mode">URL Match <span class="optional">optional</span></label>
+        <select id="url-match-mode" name="urlMatchMode">
+          <option value="contains">URL contains</option>
+          <option value="exact">Exact URL</option>
+        </select>
+        <input id="expected-url" name="expectedUrl" type="text" maxlength="1000" placeholder="https://example.com/orders/123">
+
+        <label for="required-text">Required Text <span class="optional">optional</span></label>
+        <input id="required-text" name="requiredText" type="text" maxlength="300" placeholder="Text that must appear on the page">
 
         <label for="forbidden-text">Forbidden Text <span class="optional">optional</span></label>
         <input id="forbidden-text" name="forbiddenText" type="text" maxlength="300" placeholder="Text that must not appear">
 
-        <label for="expected-title">Expected Page Title <span class="optional">optional</span></label>
-        <input id="expected-title" name="expectedPageTitle" type="text" maxlength="300" placeholder="Exact title after normalization">
+        <label for="expected-title">Exact Page Title <span class="optional">optional</span></label>
+        <input id="expected-title" name="expectedPageTitle" type="text" maxlength="300" placeholder="Exact document.title, including case and spaces">
 
-        <label for="minimum-elements">Minimum Matching Elements</label>
-        <input id="minimum-elements" name="minimumMatchingElements" type="number" min="1" max="10000" step="1" value="1" required>
-        <p class="field-note">Counts visible, most-specific DOM elements containing Required Text. Nested wrappers are not double-counted.</p>
+        <label for="minimum-elements">Minimum Matching Visible Elements <span class="optional">optional</span></label>
+        <input id="minimum-elements" name="minimumMatchingElements" type="number" min="1" max="10000" step="1" placeholder="1">
+        <p class="field-note">Counts visible, most-specific elements containing Required Text. Requires Required Text.</p>
+
+        <label for="selector-exists">CSS Selector Exists <span class="optional">optional</span></label>
+        <input id="selector-exists" name="selectorExists" type="text" maxlength="500" placeholder="e.g. #order-123 or [data-testid='success']">
+        <p class="field-note">Passes when at least one matching DOM element is visible.</p>
+
+        <label for="selector-text-selector">CSS Selector Text <span class="optional">optional</span></label>
+        <input id="selector-text-selector" name="selectorTextSelector" type="text" maxlength="500" placeholder="e.g. button[data-testid='create-order']">
+        <input id="selector-text" name="selectorText" type="text" maxlength="300" placeholder="Rendered text the selected element must contain">
+        <p class="field-note">Checks rendered text on visible selector matches; case and whitespace are normalized.</p>
+
+        <label for="attribute-selector">Attribute / Value <span class="optional">optional</span></label>
+        <input id="attribute-selector" name="attributeSelector" type="text" maxlength="500" placeholder="e.g. a[data-testid='created-order']">
+        <input id="attribute-name" name="attributeName" type="text" maxlength="100" placeholder="Attribute name, e.g. href or data-state">
+        <select id="attribute-match-mode" name="attributeMatchMode">
+          <option value="contains">Attribute contains</option>
+          <option value="exact">Attribute exactly equals</option>
+        </select>
+        <input id="attribute-value" name="attributeValue" type="text" maxlength="500" placeholder="Expected raw attribute value, e.g. /orders/123">
+        <p class="field-note">Attribute checks read raw getAttribute() values from visible matches. Text checks normalize case and whitespace.</p>
 
         <p id="form-error" class="form-error" role="alert" hidden></p>
         <button id="verify-button" type="submit">Verify Current Page</button>
