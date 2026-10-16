@@ -1,5 +1,5 @@
 import { inspectActivePage } from "./content.js";
-import { createUnavailableResult, evaluateVerification, } from "./verifier.js";
+import { createUnavailableResult, verifyWithReadback, } from "./verifier.js";
 function requireElement(selector) {
     const element = document.querySelector(selector);
     if (!element)
@@ -31,6 +31,21 @@ function collectInput() {
         throw new Error("Choose Contains or Exact value for the attribute check.");
     }
     const requiredText = fieldValue("requiredText");
+    const targetSelector = fieldValue("targetSelector");
+    if (!targetSelector) {
+        throw new Error("Enter a stable Target Selector using a unique ID or data attribute.");
+    }
+    const pollIntervalMs = Number(fieldValue("pollIntervalMs"));
+    if (!Number.isInteger(pollIntervalMs) || pollIntervalMs < 50 || pollIntervalMs > 5000) {
+        throw new Error("Polling Interval must be a whole number from 50 to 5,000 ms.");
+    }
+    const timeoutMs = Number(fieldValue("timeoutMs"));
+    if (!Number.isInteger(timeoutMs) || timeoutMs < 1000 || timeoutMs > 60000) {
+        throw new Error("Maximum Wait must be a whole number from 1,000 to 60,000 ms.");
+    }
+    if (pollIntervalMs >= timeoutMs) {
+        throw new Error("Polling Interval must be shorter than Maximum Wait.");
+    }
     const minimumRaw = fieldValue("minimumMatchingElements");
     let minimumMatchingElements = null;
     if (minimumRaw) {
@@ -61,6 +76,9 @@ function collectInput() {
     }
     const input = {
         agentClaim: fieldValue("agentClaim"),
+        targetSelector,
+        pollIntervalMs,
+        timeoutMs,
         expectedUrl: fieldValue("expectedUrl"),
         urlMatchMode,
         requiredText,
@@ -135,8 +153,17 @@ function renderResult(input, result) {
     claim.append(claimLabel, document.createTextNode(input.agentClaim));
     resultRegion.append(claim);
     if (result.unavailableReason) {
-        createText(resultRegion, "p", "form-error", `Inspection unavailable: ${result.unavailableReason}. Checks without evidence are UNVERIFIED; no conclusion was inferred.`);
+        createText(resultRegion, "p", "readback-limitation", `Inspection unavailable: ${result.unavailableReason}. Checks without evidence are UNVERIFIED; no conclusion was inferred.`);
     }
+    const readback = document.createElement("div");
+    readback.className = "readback-summary";
+    createText(readback, "p", "", `Evidence source: ${result.readback.evidenceSource}`);
+    createText(readback, "p", "", `Target: ${result.readback.targetSelector || "not identified"}${result.readback.targetIdentity ? ` → ${result.readback.targetIdentity}` : ""}`);
+    createText(readback, "p", "", `Observations: ${result.readback.observationCount}; polling interval: ${result.readback.pollIntervalMs} ms; maximum wait: ${result.readback.timeoutMs} ms.`);
+    createText(readback, "p", "", result.readback.settled
+        ? "Two consecutive observations were consistent for the same uniquely identified target."
+        : `UNVERIFIED limitation: ${result.readback.limitation}`);
+    resultRegion.append(readback);
     const checks = document.createElement("div");
     checks.className = "check-list";
     for (const item of result.checks)
@@ -164,7 +191,9 @@ form.addEventListener("submit", async (event) => {
         const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
         if (typeof tab?.id !== "number")
             throw new Error("Chrome did not provide an active tab ID.");
+        const tabId = tab.id;
         const request = {
+            targetSelector: input.targetSelector,
             requiredText: input.requiredText,
             forbiddenText: input.forbiddenText,
             selectorExists: input.selectorExists,
@@ -175,15 +204,18 @@ form.addEventListener("submit", async (event) => {
             attributeValue: input.attributeValue,
             attributeMatchMode: input.attributeMatchMode,
         };
-        const executions = await chrome.scripting.executeScript({
-            target: { tabId: tab.id },
-            func: inspectActivePage,
-            args: [request],
+        const result = await verifyWithReadback(input, async () => {
+            const executions = await chrome.scripting.executeScript({
+                target: { tabId },
+                func: inspectActivePage,
+                args: [request],
+            });
+            const snapshot = executions[0]?.result;
+            if (!snapshot)
+                throw new Error("The active tab returned no DOM inspection result.");
+            return snapshot;
         });
-        const snapshot = executions[0]?.result;
-        if (!snapshot)
-            throw new Error("The active tab returned no DOM inspection result.");
-        renderResult(input, evaluateVerification(input, snapshot));
+        renderResult(input, result);
     }
     catch (error) {
         const reason = error instanceof Error ? error.message : "Chrome did not allow inspection of this tab.";

@@ -48,6 +48,42 @@ function selectorErrorCheck(name, expected, report) {
 }
 function buildChecks(input, snapshot, unavailableReason = "") {
     const checks = [];
+    const targetExpected = `Exactly one visible target selected by ${JSON.stringify(input.targetSelector)} with a stable ID or data attribute`;
+    if (!input.targetSelector) {
+        checks.push(skippedCheck("Stable Target", targetExpected, "No stable target selector was configured."));
+    }
+    else if (!snapshot) {
+        checks.push(uninspectedCheck("Stable Target", targetExpected, unavailableReason));
+    }
+    else {
+        const target = snapshot.target;
+        let targetProblem = target.error
+            ? `The active tab rejected the target selector: ${target.error}.`
+            : target.fragileSelector
+                ? "The target selector uses a positional selector that may point to a different element after page changes."
+                : target.matchCount !== 1
+                    ? `The target selector matched ${target.matchCount} elements; exactly one is required.`
+                    : target.visibleMatchCount !== 1
+                        ? "The uniquely matched target is not visible."
+                        : !target.identity
+                            ? "The target has no stable ID or supported data identifier."
+                            : "";
+        checks.push(targetProblem
+            ? {
+                name: "Stable Target",
+                status: "UNVERIFIED",
+                expected: targetExpected,
+                observed: target.error ? "Target selector could not be evaluated." : `${target.matchCount} match(es), ${target.visibleMatchCount} visible.`,
+                evidence: `${targetProblem} Target selector: ${JSON.stringify(input.targetSelector)}.`,
+            }
+            : {
+                name: "Stable Target",
+                status: "PASS",
+                expected: targetExpected,
+                observed: `Unique target ${target.identity}`,
+                evidence: `Resolved ${JSON.stringify(input.targetSelector)} to one visible element identified by ${target.identity}.`,
+            });
+    }
     const urlExpected = input.urlMatchMode === "exact"
         ? `URL exactly equals ${JSON.stringify(input.expectedUrl)}`
         : `URL contains ${JSON.stringify(input.expectedUrl)}`;
@@ -197,7 +233,7 @@ function resultVerdict(checks) {
     }
     return configuredChecks.length > 0 ? "PASS" : "SKIPPED";
 }
-export function createUnavailableResult(input, reason) {
+export function createUnavailableResult(input, reason, observationCount = 0) {
     const checks = buildChecks(input, null, reason);
     return {
         verdict: resultVerdict(checks),
@@ -205,6 +241,16 @@ export function createUnavailableResult(input, reason) {
         pageTitle: "",
         unavailableReason: reason,
         checks,
+        readback: {
+            evidenceSource: "Rendered active-tab DOM via chrome.scripting.executeScript",
+            targetSelector: input.targetSelector,
+            targetIdentity: "",
+            observationCount,
+            pollIntervalMs: input.pollIntervalMs,
+            timeoutMs: input.timeoutMs,
+            settled: false,
+            limitation: reason,
+        },
     };
 }
 export function evaluateVerification(input, snapshot) {
@@ -215,5 +261,121 @@ export function evaluateVerification(input, snapshot) {
         pageTitle: snapshot.pageTitle,
         unavailableReason: "",
         checks,
+        readback: {
+            evidenceSource: "Rendered active-tab DOM via chrome.scripting.executeScript",
+            targetSelector: input.targetSelector,
+            targetIdentity: snapshot.target.identity,
+            observationCount: 1,
+            pollIntervalMs: input.pollIntervalMs,
+            timeoutMs: input.timeoutMs,
+            settled: false,
+            limitation: "",
+        },
     };
+}
+function defaultWait(milliseconds) {
+    return new Promise(resolve => setTimeout(resolve, milliseconds));
+}
+function isStableTarget(snapshot, expectedSelector) {
+    const target = snapshot.target;
+    return Boolean(target &&
+        target.selector === expectedSelector &&
+        !target.error &&
+        !target.fragileSelector &&
+        target.matchCount === 1 &&
+        target.visibleMatchCount === 1 &&
+        target.identity);
+}
+function observationKey(result, snapshot) {
+    return JSON.stringify({
+        targetIdentity: result.readback.targetIdentity,
+        target: snapshot.target.visibleSamples,
+        checks: result.checks.map(check => [check.name, check.status, check.observed]),
+    });
+}
+function withReadback(result, observationCount, settled, limitation) {
+    const checks = result.checks.map(check => {
+        if (check.status === "SKIPPED")
+            return check;
+        const status = settled ? check.status : "UNVERIFIED";
+        return {
+            ...check,
+            status,
+            evidence: `${check.evidence} Evidence source: ${result.readback.evidenceSource}. Observations: ${observationCount}. Poll interval: ${result.readback.pollIntervalMs} ms; maximum wait: ${result.readback.timeoutMs} ms.${limitation ? ` Limitation: ${limitation}` : " Two consecutive observations matched for the same stable target."}`,
+        };
+    });
+    return {
+        ...result,
+        verdict: settled ? result.verdict : "UNVERIFIED",
+        checks,
+        readback: {
+            ...result.readback,
+            observationCount,
+            settled,
+            limitation,
+        },
+    };
+}
+export async function verifyWithReadback(input, observe, options = {}) {
+    const now = options.now ?? (() => performance.now());
+    const wait = options.wait ?? defaultWait;
+    const startedAt = now();
+    const deadline = startedAt + input.timeoutMs;
+    let observationCount = 0;
+    let previousKey = "";
+    let lastResult = null;
+    while (now() <= deadline) {
+        let snapshot;
+        const remainingBeforeObservation = deadline - now();
+        let observationTimer;
+        try {
+            snapshot = await Promise.race([
+                observe(),
+                new Promise((_, reject) => {
+                    observationTimer = setTimeout(() => reject(new Error("Timed out waiting for the active tab DOM observation.")), Math.max(0, remainingBeforeObservation));
+                }),
+            ]);
+            observationCount += 1;
+        }
+        catch (error) {
+            const reason = error instanceof Error
+                ? error.message
+                : "The active tab did not return readable DOM evidence.";
+            if (reason.startsWith("Timed out waiting")) {
+                if (lastResult) {
+                    return withReadback(lastResult, observationCount, false, `The active-tab read did not complete before the ${input.timeoutMs} ms maximum wait.`);
+                }
+                const timedOut = createUnavailableResult(input, `The active-tab read did not complete before the ${input.timeoutMs} ms maximum wait.`, observationCount);
+                return withReadback(timedOut, observationCount, false, timedOut.unavailableReason);
+            }
+            const unavailable = createUnavailableResult(input, reason, observationCount);
+            return withReadback(unavailable, observationCount, false, `DOM evidence could not be obtained: ${reason}`);
+        }
+        finally {
+            if (observationTimer !== undefined)
+                clearTimeout(observationTimer);
+        }
+        const result = evaluateVerification(input, snapshot);
+        lastResult = result;
+        if (now() > deadline)
+            break;
+        if (!isStableTarget(snapshot, input.targetSelector)) {
+            const targetIssue = result.checks.find(check => check.name === "Stable Target")?.evidence
+                ?? "The target could not be uniquely and stably identified.";
+            return withReadback(result, observationCount, false, targetIssue);
+        }
+        const currentKey = observationKey(result, snapshot);
+        if (currentKey === previousKey && now() <= deadline) {
+            return withReadback(result, observationCount, true, "");
+        }
+        previousKey = currentKey;
+        const remaining = deadline - now();
+        if (remaining <= 0)
+            break;
+        await wait(Math.min(input.pollIntervalMs, remaining));
+    }
+    if (!lastResult) {
+        return withReadback(createUnavailableResult(input, "No DOM observation was completed before the maximum wait time.", observationCount), observationCount, false, `Timed out after ${input.timeoutMs} ms without a completed DOM observation.`);
+    }
+    return withReadback(lastResult, observationCount, false, `The target state did not produce two consecutive consistent observations before the ${input.timeoutMs} ms maximum wait.`);
 }

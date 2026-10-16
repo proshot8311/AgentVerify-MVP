@@ -137,6 +137,36 @@ export function inspectActivePage(request) {
             matchingSamples,
         };
     }
+    function inspectTarget(selector) {
+        const query = querySelector(selector);
+        const fragileSelector = /:(?:nth-(?:last-)?(?:child|of-type)|first-child|last-child|only-child|first-of-type|last-of-type|eq\s*\(|lt\s*\(|gt\s*\()/i.test(selector);
+        const element = query.elements.length === 1 ? query.elements[0] : undefined;
+        const stableDataAttributes = ["data-testid", "data-test", "data-qa", "data-cy", "data-automation-id"];
+        const dataIdentity = element
+            ? stableDataAttributes
+                .map(name => [name, element.getAttribute(name)])
+                .filter((entry) => Boolean(entry[1]))
+                .map(([name, value]) => `${name}=${JSON.stringify(value)}`)
+                .join(";")
+            : "";
+        const identity = element
+            ? element.id
+                ? `#${element.id}`
+                : dataIdentity
+                    ? dataIdentity
+                    : ""
+            : "";
+        const visible = query.elements.filter(isVisible);
+        return {
+            selector,
+            error: query.error,
+            matchCount: query.elements.length,
+            visibleMatchCount: visible.length,
+            visibleSamples: visible.slice(0, 5).map(sample),
+            identity,
+            fragileSelector,
+        };
+    }
     const body = document.body;
     const bodyText = body?.innerText ?? body?.textContent ?? "";
     const normalizedBody = normalize(bodyText);
@@ -188,5 +218,6 @@ export function inspectActivePage(request) {
         selectorExistence: inspectSelector(request.selectorExists ?? ""),
         selectorText: inspectSelectorText(request.selectorTextSelector ?? "", request.selectorText ?? ""),
         attributeValue: inspectAttribute(request.attributeSelector ?? "", request.attributeName ?? "", request.attributeValue ?? "", attributeMode),
+        target: inspectTarget(request.targetSelector ?? ""),
     };
 }

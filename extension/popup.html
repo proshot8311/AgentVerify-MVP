@@ -18,13 +18,24 @@
         </div>
       </header>
 
-      <p class="intro">Compare an agent's claim with the page currently open in this tab. The claim is context only; the verdict comes from page evidence.</p>
+      <p class="intro">Compare an agent's claim with the page currently open in this tab. The claim is context only; the verdict comes from repeated page evidence.</p>
 
       <form id="verify-form">
         <label for="agent-claim">Agent Claim</label>
         <textarea id="agent-claim" name="agentClaim" rows="2" maxlength="500" placeholder="What did the agent say it completed?" required></textarea>
 
-        <p class="field-note">Configure one or more checks. For action-specific proof, target a concrete control or result with a CSS selector and verify its text or attribute.</p>
+        <p class="field-note">Configure a stable target and one or more checks. PASS and FAIL require two consecutive consistent reads of the same unique target.</p>
+
+        <label for="target-selector">Stable Target Selector</label>
+        <input id="target-selector" name="targetSelector" type="text" maxlength="500" placeholder="e.g. #order-123 or [data-testid='created-order']" required>
+        <p class="field-note">Must match one visible element with a unique ID or supported data attribute. Positional selectors are rejected.</p>
+        <p class="field-note">Stability compares visible-text samples truncated to 180 characters; changes outside those samples may go undetected. Required/Forbidden Text checks are page-wide unless you use a selector-based check.</p>
+
+        <label for="poll-interval">Polling Interval (ms)</label>
+        <input id="poll-interval" name="pollIntervalMs" type="number" min="50" max="5000" step="50" value="500" required>
+
+        <label for="maximum-wait">Maximum Wait (ms)</label>
+        <input id="maximum-wait" name="timeoutMs" type="number" min="1000" max="60000" step="500" value="5000" required>
 
         <label for="url-match-mode">URL Match <span class="optional">optional</span></label>
         <select id="url-match-mode" name="urlMatchMode">
@@ -70,7 +81,7 @@
       </form>
 
       <section id="result" aria-live="polite" aria-atomic="true" hidden></section>
-      <footer>Inspects the active tab directly. No page fetches or uploads.</footer>
+      <footer>DOM reads do not prove causation, persisted application state, or external effects (emails/webhooks). Read-back observations are not persisted to the dashboard.</footer>
     </main>
   </body>
 </html>

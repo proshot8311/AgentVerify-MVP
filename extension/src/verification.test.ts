@@ -131,6 +131,9 @@ const baseInput: VerificationInput = {
   attributeName: "",
   attributeValue: "",
   attributeMatchMode: "contains",
+  targetSelector: "#target",
+  pollIntervalMs: 500,
+  timeoutMs: 5000,
 };
 
 function pageSnapshot(overrides: Partial<PageSnapshot> = {}): PageSnapshot {
@@ -148,6 +151,15 @@ function pageSnapshot(overrides: Partial<PageSnapshot> = {}): PageSnapshot {
     selectorExistence: emptySelector,
     selectorText: emptySelectorText,
     attributeValue: emptyAttribute,
+    target: {
+      selector: "#target",
+      error: "",
+      matchCount: 1,
+      visibleMatchCount: 1,
+      visibleSamples: [{ tag: "main", text: "Issue created" }],
+      identity: "#target",
+      fragileSelector: false,
+    },
     ...overrides,
   };
 }
@@ -187,6 +199,7 @@ test("inspects active-tab DOM text, visible counts, and action-specific selector
 
   try {
     const observed = inspectActivePage({
+      targetSelector: '[data-testid="created-issue"]',
       requiredText: "issue #123 created",
       forbiddenText: "permission denied",
       selectorExists: '[data-testid="created-issue"]',
@@ -206,10 +219,15 @@ test("inspects active-tab DOM text, visible counts, and action-specific selector
     assert.equal(observed.attributeValue.matchingVisibleCount, 1);
     assert.equal(observed.attributeValue.valueSamples[0]?.value, "/issues/123");
     assert.equal(observed.pageUrl, "https://github.com/example/repo/issues");
+    assert.equal(observed.target.matchCount, 1);
+    assert.equal(observed.target.identity, 'data-testid="created-issue"');
+    assert.equal(observed.target.fragileSelector, false);
 
     const hiddenSelector = inspectActivePage({ selectorExists: "#hidden-template" });
     assert.equal(hiddenSelector.selectorExistence.matchCount, 1);
     assert.equal(hiddenSelector.selectorExistence.visibleMatchCount, 0);
+    const positionalTarget = inspectActivePage({ targetSelector: "div:nth-child(2)" });
+    assert.equal(positionalTarget.target.fragileSelector, true);
     assert.equal(fetchCalled, false);
   } finally {
     restorePage();
@@ -390,7 +408,7 @@ test("keeps unavailable configured checks UNVERIFIED and unconfigured checks SKI
   );
 
   assert.equal(unavailable.verdict, "UNVERIFIED");
-  assert.equal(unavailable.checks.length, 8);
+  assert.equal(unavailable.checks.length, 9);
   assert.equal(unavailable.checks.find(check => check.name === "Required Text")?.status, "UNVERIFIED");
   assert.equal(unavailable.checks.find(check => check.name === "CSS Selector Exists")?.status, "SKIPPED");
   assert.ok(unavailable.checks.filter(check => check.status === "UNVERIFIED").every(check => /No page content was observed/.test(check.evidence)));
@@ -401,6 +419,7 @@ test("returns SKIPPED when every check is intentionally unconfigured", () => {
   const input = {
     ...baseInput,
     expectedUrl: "",
+    targetSelector: "",
     requiredText: "",
     forbiddenText: "",
     expectedPageTitle: "",
