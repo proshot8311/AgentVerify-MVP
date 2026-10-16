@@ -117,7 +117,14 @@ function renderResult(input, result) {
     resultRegion.hidden = false;
     const top = document.createElement("div");
     top.className = "result-top";
-    const verdict = createText(top, "h2", `verdict ${result.verdict === "VERIFIED" ? "verified" : "failed"}`, result.verdict);
+    const verdictClass = result.verdict === "PASS"
+        ? "pass"
+        : result.verdict === "FAIL"
+            ? "fail"
+            : result.verdict === "UNVERIFIED"
+                ? "unverified"
+                : "skipped";
+    const verdict = createText(top, "h2", `verdict ${verdictClass}`, result.verdict);
     verdict.setAttribute("aria-label", `Verdict: ${result.verdict}`);
     resultRegion.append(top);
     createText(resultRegion, "p", "result-page", result.pageUrl || (result.unavailableReason ? "Active tab could not be inspected." : "Page URL unavailable."));
@@ -128,7 +135,7 @@ function renderResult(input, result) {
     claim.append(claimLabel, document.createTextNode(input.agentClaim));
     resultRegion.append(claim);
     if (result.unavailableReason) {
-        createText(resultRegion, "p", "form-error", `Inspection unavailable: ${result.unavailableReason}. The verdict is FAILED because the contract could not be checked; no page content was inferred.`);
+        createText(resultRegion, "p", "form-error", `Inspection unavailable: ${result.unavailableReason}. Checks without evidence are UNVERIFIED; no conclusion was inferred.`);
     }
     const checks = document.createElement("div");
     checks.className = "check-list";

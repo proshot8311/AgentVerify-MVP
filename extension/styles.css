@@ -96,8 +96,10 @@ button:disabled { cursor: wait; opacity: .65; }
 
 .result-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .result-top h2 { margin: 0; font: 800 16px/1.3 ui-monospace, SFMono-Regular, Menlo, monospace; }
-.verdict.verified { color: #65d6a6; }
-.verdict.failed { color: #ff8983; }
+.verdict.pass, .check-status.pass { color: #65d6a6; }
+.verdict.fail, .check-status.fail { color: #ff8983; }
+.verdict.unverified, .check-status.unverified { color: #f0c674; }
+.verdict.skipped { color: #96a3b3; }
 .result-page { margin: 8px 0; color: #8996a6; font: 10px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; overflow-wrap: anywhere; }
 .claim-context { margin: 9px 0 12px; color: #c5ced9; font-size: 11px; line-height: 1.5; }
 .claim-context strong { display: block; margin-bottom: 3px; color: #8491a1; font-size: 9px; letter-spacing: .06em; text-transform: uppercase; }
@@ -113,6 +115,7 @@ button:disabled { cursor: wait; opacity: .65; }
 .check-status.pass { color: #65d6a6; }
 .check-status.fail { color: #ff8983; }
 .check-status.skipped { color: #96a3b3; }
+.check-status.unverified { color: #f0c674; }
 .check p { margin: 6px 0 0; color: #aab4c1; font-size: 10px; line-height: 1.45; overflow-wrap: anywhere; }
 .check p strong { color: #d4dce6; }
 footer { margin-top: 15px; color: #687586; font-size: 9px; text-align: center; }

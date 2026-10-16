@@ -27,8 +27,9 @@ function Layout({ children }: { children: ReactNode }) {
   </div>;
 }
 function Status({ verdict }: { verdict: Verdict }) {
-  const kind = verdict === "VERIFIED" ? "pass" : verdict === "FAILED" ? "fail" : "partial";
-  return <span className={`status ${kind}`} data-testid="status-verdict">{verdict === "VERIFIED" ? <Check size={11} /> : verdict === "FAILED" ? <X size={11} /> : <CircleAlert size={11} />}{verdict}</span>;
+  const kind = verdict.toLowerCase();
+  const icon = verdict === "PASS" ? <Check size={11} /> : verdict === "FAIL" ? <X size={11} /> : <CircleAlert size={11} />;
+  return <span className={`status ${kind}`} data-testid="status-verdict">{icon}{verdict}</span>;
 }
 function Header({ eyebrow, title, subtitle, children }: { eyebrow: string; title: string; subtitle?: string; children?: ReactNode }) {
   return <div className="fade-in"><div className="eyebrow">{eyebrow}</div><h1 className="page-title">{title}</h1>{subtitle && <p className="page-subtitle">{subtitle}</p>}{children}</div>;
@@ -48,7 +49,7 @@ function Landing() {
           <div className="term-line"><span className="term-num">01</span><span><span className="term-key">claim</span> <span className="term-muted">→</span> <span className="term-val">“Task created successfully”</span></span></div>
           <div className="term-line"><span className="term-num">02</span><span><span className="term-key">observe</span> <span className="term-muted">→</span> <span className="term-val">browser DOM inspection</span></span></div>
           <div className="term-line"><span className="term-num">03</span><span><span className="term-key">evidence</span> <span className="term-muted">→</span> <span className="term-val">1 matching element</span></span></div>
-          <div className="term-line"><span className="term-num">04</span><span><span className="term-key">verdict</span> <span className="term-muted">→</span> <span className="term-result">VERIFIED</span></span></div>
+          <div className="term-line"><span className="term-num">04</span><span><span className="term-key">verdict</span> <span className="term-muted">→</span> <span className="term-result">PASS</span></span></div>
         </div>
       </div>
     </section>
@@ -72,18 +73,22 @@ function EmptyState({ icon: Icon, title, text, action }: { icon: typeof BookOpen
 }
 function Dashboard() {
   const [runs, setRuns] = useState(getRuns);
-  const verified = runs.filter(run => run.verdict === "VERIFIED").length;
-  const failed = runs.filter(run => run.verdict === "FAILED").length;
-  const verificationRate = runs.length ? Math.round((verified / runs.length) * 100) : null;
+  const passed = runs.filter(run => run.verdict === "PASS").length;
+  const failed = runs.filter(run => run.verdict === "FAIL").length;
+  const unverified = runs.filter(run => run.verdict === "UNVERIFIED").length;
+  const skipped = runs.filter(run => run.verdict === "SKIPPED").length;
+  const verificationRate = runs.length ? Math.round((passed / runs.length) * 100) : null;
   return <main className="app-main">
     <Header eyebrow="Local workspace / evidence ledger" title="Dashboard" subtitle="A browser-local record of contracts and what verification could actually observe.">
       <div className="subnav"><Link href="/contracts/new" className="button primary small" data-testid="button-new-contract"><FilePlus2 size={13} />New contract</Link><Link href="/demo" className="button small" data-testid="button-open-demo"><FlaskConical size={13} />Run demo</Link></div>
     </Header>
     <section className="stat-grid">
       <div className="panel stat-card"><div className="eyebrow">TOTAL VERIFICATIONS</div><div className="stat-val" data-testid="value-run-count">{runs.length}</div><div className="stat-label">Local evidence records</div></div>
-      <div className="panel stat-card"><div className="eyebrow">VERIFIED</div><div className="stat-val" data-testid="value-verified-count">{verified}</div><div className="stat-label">All configured checks passed</div></div>
-      <div className="panel stat-card"><div className="eyebrow">FAILED</div><div className="stat-val" data-testid="value-failed-count">{failed}</div><div className="stat-label">{runs.filter(r => r.verdict === "PARTIALLY VERIFIED").length} partially verified</div></div>
-      <div className="panel stat-card"><div className="eyebrow">VERIFICATION RATE</div><div className="stat-val" data-testid="value-verification-rate">{verificationRate === null ? "—" : `${verificationRate}%`}</div><div className="stat-label">{verificationRate === null ? "No runs yet" : `${verified} of ${runs.length} fully verified`}</div></div>
+      <div className="panel stat-card"><div className="eyebrow">PASS</div><div className="stat-val" data-testid="value-pass-count">{passed}</div><div className="stat-label">All configured checks passed</div></div>
+      <div className="panel stat-card"><div className="eyebrow">FAIL</div><div className="stat-val" data-testid="value-fail-count">{failed}</div><div className="stat-label">At least one observed check failed</div></div>
+      <div className="panel stat-card"><div className="eyebrow">UNVERIFIED</div><div className="stat-val" data-testid="value-unverified-count">{unverified}</div><div className="stat-label">Required evidence was unavailable</div></div>
+      <div className="panel stat-card"><div className="eyebrow">SKIPPED</div><div className="stat-val" data-testid="value-skipped-count">{skipped}</div><div className="stat-label">Verification was not applicable</div></div>
+      <div className="panel stat-card"><div className="eyebrow">PASS RATE</div><div className="stat-val" data-testid="value-verification-rate">{verificationRate === null ? "—" : `${verificationRate}%`}</div><div className="stat-label">{verificationRate === null ? "No runs yet" : `${passed} of ${runs.length} runs passed`}</div></div>
     </section>
     <section className="panel">
       <div style={{ padding: "20px 22px 0", display: "flex", justifyContent: "space-between", alignItems: "center" }}><div><div className="section-label">Recent verification runs</div><p className="muted tiny" style={{ margin: "6px 0 0" }}>Newest first · saved locally</p></div><Clock3 size={16} color="#758190" /></div>
@@ -144,7 +149,7 @@ function ContractBuilder() {
   </main>;
 }
 function CheckCard({ item, index }: { item: RunCheck; index: number }) {
-  const className = item.status === "PASS" ? "pass" : item.status === "FAIL" ? "fail" : "partial";
+  const className = item.status.toLowerCase();
   return <article className="panel check-card" data-testid={`card-check-${index}`}><div className="check-head"><div><div className="check-title">{item.name}</div><div className="muted tiny mono" style={{ marginTop: 5 }}>CHECK {String(index + 1).padStart(2, "0")}</div></div><span className={`status ${className}`} data-testid={`status-check-${index}`}>{item.status}</span></div><div className="check-grid"><b>EXPECTED</b><span>{item.expected}</span><b>OBSERVED</b><span>{item.observed}</span><b>EVIDENCE</b><span className="evidence">{item.evidence}</span></div></article>;
 }
 function ResultPage() {

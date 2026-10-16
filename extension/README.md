@@ -31,13 +31,17 @@ The **Agent Claim** is retained as context only; it does not affect the verdict.
 - **CSS Selector Text** checks normalized rendered text on visible elements matched by the selector.
 - **Attribute / Value** checks the raw `getAttribute()` value on visible elements matched by the selector, using literal, case-sensitive **contains** or **exact** matching. For example, select `a[data-testid="created-order"]`, inspect `href`, and require it to contain `/orders/123`.
 
-Selector-based checks make it possible to target a specific control or result instead of relying on a generic word elsewhere on the page. Every result check reports **PASS**, **FAIL**, or **SKIPPED**, with its expected value, observed value, and evidence. Checks left blank are **SKIPPED**. If Chrome refuses active-tab access, configured checks are **SKIPPED**, the overall verdict is **FAILED**, and no page evidence is invented.
+Selector-based checks make it possible to target a specific control or result instead of relying on a generic word elsewhere on the page. Every result check reports **PASS**, **FAIL**, **UNVERIFIED**, or **SKIPPED**, with its expected value, observed value, and evidence. Checks left blank are **SKIPPED**. Configured checks without sufficient evidence, including when Chrome refuses active-tab access, are **UNVERIFIED**; missing evidence is not treated as either a failed assertion or a successful verification. A definitive **FAIL** takes precedence over other checks that are **UNVERIFIED**. Overall **PASS** requires every configured check to pass; an intentionally empty set of checks is **SKIPPED**.
 
 ## Access limits
 
 The extension only inspects the current active tab after you open its popup and click Verify. It queries that tab's DOM through `chrome.scripting.executeScript`; it never calls `fetch()` to inspect external websites and has no broad website host permissions. Chrome can block extension scripts on protected pages such as `chrome://` pages and the Chrome Web Store; file URLs may require enabling **Allow access to file URLs** on the extension's details page. The extension reads the top-level page DOM, not cross-origin iframe contents.
 
-The web dashboard's URL fetch is best-effort and can be blocked by CORS or other browser restrictions. Use this extension for direct inspection of an external page open in the active tab. It does not bypass CORS.
+DOM evidence is a snapshot of what the page exposes at inspection time. It does not, by itself, prove that an agent's action caused the observed state, that the state was saved or persisted on a server, or that hidden application state agrees with the rendered page. A passing check supports only the specific observable condition that was tested.
+
+The web dashboard's URL fetch is best-effort and can be blocked by CORS or other browser restrictions. It parses the fetched HTML, which may differ from the active page's rendered DOM. Use this extension for direct inspection of an external page open in the active tab. It does not bypass CORS.
+
+Neither fetched HTML nor a rendered-DOM snapshot proves that an agent's action caused the observed state, that the state was saved or persisted on a server, or that hidden application state agrees with the page. A **PASS** supports only the specific observable condition that was tested; it is not proof of causation or persistence.
 
 ## Local checks
 

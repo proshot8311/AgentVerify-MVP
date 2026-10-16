@@ -7,10 +7,19 @@ function skippedCheck(name, expected, reason) {
 function uninspectedCheck(name, expected, reason) {
     return {
         name,
-        status: "SKIPPED",
+        status: "UNVERIFIED",
         expected,
         observed: "Not inspected",
         evidence: `The active tab could not be inspected: ${reason}. No page content was observed and no conclusion was inferred.`,
+    };
+}
+function unobservedCheck(name, expected, reason) {
+    return {
+        name,
+        status: "UNVERIFIED",
+        expected,
+        observed: "Not observed",
+        evidence: `${reason} No conclusion was inferred from missing evidence.`,
     };
 }
 function evaluatedCheck(name, expected, passed, observed, evidence) {
@@ -29,7 +38,13 @@ function unavailableOrSkipped(name, expected, configured, reason) {
 function selectorErrorCheck(name, expected, report) {
     if (!report.error)
         return null;
-    return evaluatedCheck(name, expected, false, "The CSS selector could not be evaluated.", `The active tab rejected CSS selector ${JSON.stringify(report.selector)}: ${report.error}. No matching page element was claimed.`);
+    return {
+        name,
+        status: "UNVERIFIED",
+        expected,
+        observed: "The CSS selector could not be evaluated.",
+        evidence: `The active tab rejected CSS selector ${JSON.stringify(report.selector)}: ${report.error}. No matching page element was claimed and no conclusion was inferred.`,
+    };
 }
 function buildChecks(input, snapshot, unavailableReason = "") {
     const checks = [];
@@ -43,7 +58,7 @@ function buildChecks(input, snapshot, unavailableReason = "") {
         checks.push(unavailableOrSkipped("URL", urlExpected, true, unavailableReason));
     }
     else if (!snapshot.pageUrl) {
-        checks.push(skippedCheck("URL", urlExpected, "The active tab did not provide a URL to compare."));
+        checks.push(unobservedCheck("URL", urlExpected, "The active tab did not provide a URL to compare."));
     }
     else {
         const passed = input.urlMatchMode === "exact"
@@ -59,7 +74,7 @@ function buildChecks(input, snapshot, unavailableReason = "") {
         checks.push(unavailableOrSkipped("Required Text", requiredExpected, true, unavailableReason));
     }
     else if (!snapshot.bodyAvailable || snapshot.requiredTextFound === null) {
-        checks.push(skippedCheck("Required Text", requiredExpected, "The active tab did not expose rendered body text; no text conclusion was inferred."));
+        checks.push(unobservedCheck("Required Text", requiredExpected, "The active tab did not expose rendered body text."));
     }
     else {
         const passed = snapshot.requiredTextFound;
@@ -75,7 +90,7 @@ function buildChecks(input, snapshot, unavailableReason = "") {
         checks.push(unavailableOrSkipped("Forbidden Text", forbiddenExpected, true, unavailableReason));
     }
     else if (!snapshot.bodyAvailable || snapshot.forbiddenTextFound === null) {
-        checks.push(skippedCheck("Forbidden Text", forbiddenExpected, "The active tab did not expose rendered body text; absence was not inferred."));
+        checks.push(unobservedCheck("Forbidden Text", forbiddenExpected, "The active tab did not expose rendered body text."));
     }
     else {
         const found = snapshot.forbiddenTextFound;
@@ -106,7 +121,7 @@ function buildChecks(input, snapshot, unavailableReason = "") {
         checks.push(unavailableOrSkipped("Minimum Matching Visible Elements", minimumExpected, true, unavailableReason));
     }
     else if (!snapshot.bodyAvailable) {
-        checks.push(skippedCheck("Minimum Matching Visible Elements", minimumExpected, "The active tab did not expose a document body; no element count was inferred."));
+        checks.push(unobservedCheck("Minimum Matching Visible Elements", minimumExpected, "The active tab did not expose a document body."));
     }
     else {
         const count = snapshot.matchingElementCount;
@@ -172,15 +187,20 @@ function buildChecks(input, snapshot, unavailableReason = "") {
     return checks;
 }
 function resultVerdict(checks) {
+    if (checks.length === 0)
+        return "UNVERIFIED";
     const configuredChecks = checks.filter(check => check.status !== "SKIPPED");
-    return configuredChecks.length > 0 && configuredChecks.every(check => check.status === "PASS")
-        ? "VERIFIED"
-        : "FAILED";
+    if (configuredChecks.some(check => check.status === "FAIL"))
+        return "FAIL";
+    if (configuredChecks.some(check => check.status !== "PASS")) {
+        return "UNVERIFIED";
+    }
+    return configuredChecks.length > 0 ? "PASS" : "SKIPPED";
 }
 export function createUnavailableResult(input, reason) {
     const checks = buildChecks(input, null, reason);
     return {
-        verdict: "FAILED",
+        verdict: resultVerdict(checks),
         pageUrl: "",
         pageTitle: "",
         unavailableReason: reason,

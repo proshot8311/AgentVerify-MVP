@@ -301,13 +301,13 @@ test("verifies a specific action using a visible control, its text, and a raw hr
     },
   }));
 
-  assert.equal(result.verdict, "VERIFIED");
+  assert.equal(result.verdict, "PASS");
   assert.equal(result.checks.find(check => check.name === "CSS Selector Exists")?.status, "PASS");
   assert.equal(result.checks.find(check => check.name === "CSS Selector Text")?.status, "PASS");
   const attributeCheck = result.checks.find(check => check.name === "Attribute / Value");
   assert.equal(attributeCheck?.status, "PASS");
   assert.match(attributeCheck?.evidence ?? "", /getAttribute/);
-  assert.ok(result.checks.every(check => ["PASS", "FAIL", "SKIPPED"].includes(check.status)));
+  assert.ok(result.checks.every(check => ["PASS", "FAIL", "SKIPPED", "UNVERIFIED"].includes(check.status)));
 });
 
 test("fails selector checks for hidden-only elements and reports invalid CSS selectors explicitly", () => {
@@ -355,8 +355,9 @@ test("fails selector checks for hidden-only elements and reports invalid CSS sel
     }),
   );
   const invalidCheck = invalid.checks.find(check => check.name === "CSS Selector Exists");
-  assert.equal(invalidCheck?.status, "FAIL");
+  assert.equal(invalidCheck?.status, "UNVERIFIED");
   assert.match(invalidCheck?.evidence ?? "", /rejected CSS selector/);
+  assert.equal(invalid.verdict, "UNVERIFIED");
 });
 
 test("fails when required text is absent, forbidden text is present, or minimum count is too low", () => {
@@ -376,26 +377,27 @@ test("fails when required text is absent, forbidden text is present, or minimum 
     }),
   );
 
-  assert.equal(result.verdict, "FAILED");
+  assert.equal(result.verdict, "FAIL");
   assert.equal(result.checks.find(check => check.name === "Required Text")?.status, "FAIL");
   assert.equal(result.checks.find(check => check.name === "Forbidden Text")?.status, "FAIL");
   assert.equal(result.checks.find(check => check.name === "Minimum Matching Visible Elements")?.status, "FAIL");
 });
 
-test("uses SKIPPED for unconfigured checks and unavailable active-tab inspection without inventing evidence", () => {
+test("keeps unavailable configured checks UNVERIFIED and unconfigured checks SKIPPED", () => {
   const unavailable = createUnavailableResult(
     { ...baseInput, forbiddenText: "permission denied" },
     "Chrome blocked script injection on this page",
   );
 
-  assert.equal(unavailable.verdict, "FAILED");
+  assert.equal(unavailable.verdict, "UNVERIFIED");
   assert.equal(unavailable.checks.length, 8);
-  assert.ok(unavailable.checks.every(check => check.status === "SKIPPED"));
-  assert.ok(unavailable.checks.every(check => /No page content was observed|not configured|No expected|No Required|No Forbidden|No minimum|No selector|No existence selector|No attribute/i.test(check.evidence)));
-  assert.equal(new Set(unavailable.checks.map(check => check.status)).size, 1);
+  assert.equal(unavailable.checks.find(check => check.name === "Required Text")?.status, "UNVERIFIED");
+  assert.equal(unavailable.checks.find(check => check.name === "CSS Selector Exists")?.status, "SKIPPED");
+  assert.ok(unavailable.checks.filter(check => check.status === "UNVERIFIED").every(check => /No page content was observed/.test(check.evidence)));
+  assert.ok(unavailable.checks.filter(check => check.status === "SKIPPED").every(check => /not configured|No .* configured/.test(check.evidence)));
 });
 
-test("does not return a verified verdict when every optional check is skipped", () => {
+test("returns SKIPPED when every check is intentionally unconfigured", () => {
   const input = {
     ...baseInput,
     expectedUrl: "",
@@ -408,6 +410,32 @@ test("does not return a verified verdict when every optional check is skipped", 
     requiredTextFound: null,
     forbiddenTextFound: null,
   }));
-  assert.equal(result.verdict, "FAILED");
+  assert.equal(result.verdict, "SKIPPED");
   assert.ok(result.checks.every(check => check.status === "SKIPPED"));
+});
+
+test("returns UNVERIFIED when a passing check coexists with insufficient evidence", () => {
+  const result = evaluateVerification(
+    { ...baseInput, expectedUrl: "https://github.com/example/repo/issues" },
+    pageSnapshot({ requiredTextFound: null }),
+  );
+
+  assert.equal(result.verdict, "UNVERIFIED");
+  assert.equal(result.checks.find(check => check.name === "URL")?.status, "PASS");
+  assert.equal(result.checks.find(check => check.name === "Required Text")?.status, "UNVERIFIED");
+});
+
+test("an observed failure remains FAIL even when another configured check is UNVERIFIED", () => {
+  const result = evaluateVerification(
+    { ...baseInput, forbiddenText: "permission denied" },
+    pageSnapshot({
+      requiredTextFound: null,
+      forbiddenTextFound: true,
+      forbiddenTextExcerpt: "permission denied",
+    }),
+  );
+
+  assert.equal(result.verdict, "FAIL");
+  assert.equal(result.checks.find(check => check.name === "Required Text")?.status, "UNVERIFIED");
+  assert.equal(result.checks.find(check => check.name === "Forbidden Text")?.status, "FAIL");
 });

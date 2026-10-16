@@ -24,7 +24,8 @@ export interface VerificationInput {
   attributeMatchMode: AttributeMatchMode;
 }
 
-export type CheckStatus = "PASS" | "FAIL" | "SKIPPED";
+export type CheckStatus = "PASS" | "FAIL" | "SKIPPED" | "UNVERIFIED";
+export type Verdict = CheckStatus;
 
 export interface VerificationCheck {
   name: string;
@@ -35,7 +36,7 @@ export interface VerificationCheck {
 }
 
 export interface VerificationResult {
-  verdict: "VERIFIED" | "FAILED";
+  verdict: Verdict;
   pageUrl: string;
   pageTitle: string;
   unavailableReason: string;
@@ -53,10 +54,20 @@ function skippedCheck(name: string, expected: string, reason: string): Verificat
 function uninspectedCheck(name: string, expected: string, reason: string): VerificationCheck {
   return {
     name,
-    status: "SKIPPED",
+    status: "UNVERIFIED",
     expected,
     observed: "Not inspected",
     evidence: `The active tab could not be inspected: ${reason}. No page content was observed and no conclusion was inferred.`,
+  };
+}
+
+function unobservedCheck(name: string, expected: string, reason: string): VerificationCheck {
+  return {
+    name,
+    status: "UNVERIFIED",
+    expected,
+    observed: "Not observed",
+    evidence: `${reason} No conclusion was inferred from missing evidence.`,
   };
 }
 
@@ -93,13 +104,13 @@ function selectorErrorCheck(
   report: Pick<SelectorInspection | SelectorTextInspection, "selector" | "error">,
 ): VerificationCheck | null {
   if (!report.error) return null;
-  return evaluatedCheck(
+  return {
     name,
+    status: "UNVERIFIED",
     expected,
-    false,
-    "The CSS selector could not be evaluated.",
-    `The active tab rejected CSS selector ${JSON.stringify(report.selector)}: ${report.error}. No matching page element was claimed.`,
-  );
+    observed: "The CSS selector could not be evaluated.",
+    evidence: `The active tab rejected CSS selector ${JSON.stringify(report.selector)}: ${report.error}. No matching page element was claimed and no conclusion was inferred.`,
+  };
 }
 
 function buildChecks(
@@ -117,7 +128,7 @@ function buildChecks(
   } else if (!snapshot) {
     checks.push(unavailableOrSkipped("URL", urlExpected, true, unavailableReason));
   } else if (!snapshot.pageUrl) {
-    checks.push(skippedCheck("URL", urlExpected, "The active tab did not provide a URL to compare."));
+    checks.push(unobservedCheck("URL", urlExpected, "The active tab did not provide a URL to compare."));
   } else {
     const passed = input.urlMatchMode === "exact"
       ? snapshot.pageUrl === input.expectedUrl
@@ -137,7 +148,7 @@ function buildChecks(
   } else if (!snapshot) {
     checks.push(unavailableOrSkipped("Required Text", requiredExpected, true, unavailableReason));
   } else if (!snapshot.bodyAvailable || snapshot.requiredTextFound === null) {
-    checks.push(skippedCheck("Required Text", requiredExpected, "The active tab did not expose rendered body text; no text conclusion was inferred."));
+    checks.push(unobservedCheck("Required Text", requiredExpected, "The active tab did not expose rendered body text."));
   } else {
     const passed = snapshot.requiredTextFound;
     checks.push(evaluatedCheck(
@@ -157,7 +168,7 @@ function buildChecks(
   } else if (!snapshot) {
     checks.push(unavailableOrSkipped("Forbidden Text", forbiddenExpected, true, unavailableReason));
   } else if (!snapshot.bodyAvailable || snapshot.forbiddenTextFound === null) {
-    checks.push(skippedCheck("Forbidden Text", forbiddenExpected, "The active tab did not expose rendered body text; absence was not inferred."));
+    checks.push(unobservedCheck("Forbidden Text", forbiddenExpected, "The active tab did not expose rendered body text."));
   } else {
     const found = snapshot.forbiddenTextFound;
     checks.push(evaluatedCheck(
@@ -196,7 +207,7 @@ function buildChecks(
   } else if (!snapshot) {
     checks.push(unavailableOrSkipped("Minimum Matching Visible Elements", minimumExpected, true, unavailableReason));
   } else if (!snapshot.bodyAvailable) {
-    checks.push(skippedCheck("Minimum Matching Visible Elements", minimumExpected, "The active tab did not expose a document body; no element count was inferred."));
+    checks.push(unobservedCheck("Minimum Matching Visible Elements", minimumExpected, "The active tab did not expose a document body."));
   } else {
     const count = snapshot.matchingElementCount;
     const examples = describeSamples(snapshot.matchingElementSamples);
@@ -280,11 +291,14 @@ function buildChecks(
   return checks;
 }
 
-function resultVerdict(checks: VerificationCheck[]): "VERIFIED" | "FAILED" {
+function resultVerdict(checks: VerificationCheck[]): Verdict {
+  if (checks.length === 0) return "UNVERIFIED";
   const configuredChecks = checks.filter(check => check.status !== "SKIPPED");
-  return configuredChecks.length > 0 && configuredChecks.every(check => check.status === "PASS")
-    ? "VERIFIED"
-    : "FAILED";
+  if (configuredChecks.some(check => check.status === "FAIL")) return "FAIL";
+  if (configuredChecks.some(check => check.status !== "PASS")) {
+    return "UNVERIFIED";
+  }
+  return configuredChecks.length > 0 ? "PASS" : "SKIPPED";
 }
 
 export function createUnavailableResult(
@@ -293,7 +307,7 @@ export function createUnavailableResult(
 ): VerificationResult {
   const checks = buildChecks(input, null, reason);
   return {
-    verdict: "FAILED",
+    verdict: resultVerdict(checks),
     pageUrl: "",
     pageTitle: "",
     unavailableReason: reason,

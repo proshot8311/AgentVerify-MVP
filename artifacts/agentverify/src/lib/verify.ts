@@ -1,12 +1,6 @@
-import type { Check, Contract, Run, Verdict } from "./store";
+import { verdictFromChecks, type Check, type Contract, type Run } from "./store.ts";
 import { makeId, saveRun } from "./store.ts";
 
-function verdictFor(checks: Check[]): Verdict {
-  const passed = checks.filter(check => check.status === "PASS").length;
-  if (checks.length > 0 && passed === checks.length) return "VERIFIED";
-  if (passed === 0) return "FAILED";
-  return "PARTIALLY VERIFIED";
-}
 function check(name: string, pass: boolean, expected: string, observed: string, evidence: string): Check {
   return { name, status: pass ? "PASS" : "FAIL", expected, observed, evidence };
 }
@@ -43,10 +37,10 @@ export async function verifyContract(contract: Contract): Promise<Run> {
   ].filter(Boolean).length;
   if (inspectionError) {
     const reason = `Inspection unavailable: ${inspectionError}. Browser fetch could not provide inspectable HTML; no target content was inferred.`;
-    if (contract.requiredText.trim()) checks.push({ name: "Required text", status: "UNAVAILABLE", expected: `Contains “${contract.requiredText}” (case-insensitive)`, observed: "Unavailable", evidence: reason });
-    if (contract.forbiddenText.trim()) checks.push({ name: "Forbidden text", status: "UNAVAILABLE", expected: `Does not contain “${contract.forbiddenText}” (case-insensitive)`, observed: "Unavailable", evidence: reason });
-    if (contract.expectedTitle.trim()) checks.push({ name: "Page title", status: "UNAVAILABLE", expected: `Title equals “${contract.expectedTitle}”`, observed: "Unavailable", evidence: reason });
-    if (contract.minimumElements !== null) checks.push({ name: "Minimum matching elements", status: "UNAVAILABLE", expected: `At least ${contract.minimumElements} element(s) containing the required text`, observed: "Unavailable", evidence: reason });
+    if (contract.requiredText.trim()) checks.push({ name: "Required text", status: "UNVERIFIED", expected: `Contains “${contract.requiredText}” (case-insensitive)`, observed: "Unavailable", evidence: reason });
+    if (contract.forbiddenText.trim()) checks.push({ name: "Forbidden text", status: "UNVERIFIED", expected: `Does not contain “${contract.forbiddenText}” (case-insensitive)`, observed: "Unavailable", evidence: reason });
+    if (contract.expectedTitle.trim()) checks.push({ name: "Page title", status: "UNVERIFIED", expected: `Title equals “${contract.expectedTitle}”`, observed: "Unavailable", evidence: reason });
+    if (contract.minimumElements !== null) checks.push({ name: "Minimum matching elements", status: "UNVERIFIED", expected: `At least ${contract.minimumElements} element(s) containing the required text`, observed: "Unavailable", evidence: reason });
   } else {
     const lowerBody = bodyText.toLocaleLowerCase();
     const required = contract.requiredText.trim();
@@ -73,7 +67,7 @@ export async function verifyContract(contract: Contract): Promise<Run> {
       checks.push(check("Minimum matching elements", pass, `At least ${contract.minimumElements} ${phrase ? "element(s) containing Required Text" : "body descendant element(s)"}`, `${matches} matching element(s)`, `Counted ${matches} actual parsed DOM element(s): ${basis}. Nested matches count individually.`));
     }
   }
-  if (!configured) checks.push({ name: "HTTP inspection", status: inspectionError ? "UNAVAILABLE" : "PASS", expected: "Fetch and parse target HTML", observed: inspectionError ? "Unavailable" : "HTML parsed", evidence: inspectionError ? `Inspection unavailable: ${inspectionError}. No target content was inferred.` : `Fetched ${contract.targetUrl} in this browser and parsed HTML; title ${JSON.stringify(title)}, body text ${bodyText.length} characters.` });
+  if (!configured) checks.push({ name: "HTTP inspection", status: inspectionError ? "UNVERIFIED" : "PASS", expected: "Fetch and parse target HTML", observed: inspectionError ? "Unavailable" : "HTML parsed", evidence: inspectionError ? `Inspection unavailable: ${inspectionError}. No target content was inferred.` : `Fetched ${contract.targetUrl} in this browser and parsed HTML; title ${JSON.stringify(title)}, body text ${bodyText.length} characters.` });
   const passed = checks.filter(item => item.status === "PASS").length;
   const run: Run = {
     id: makeId(), timestamp: new Date().toISOString(), contract, agentClaim: contract.agentClaim,
@@ -83,8 +77,10 @@ export async function verifyContract(contract: Contract): Promise<Run> {
       contract.expectedTitle && `Page title is “${contract.expectedTitle}”`,
       contract.minimumElements !== null && `At least ${contract.minimumElements} matching elements`,
     ].filter(Boolean).join("; ") || "HTTP(S) page inspection completes successfully.",
-    observedOutcome: inspectionError ? `Inspection could not be completed: ${inspectionError}.` : `${passed} of ${checks.length} configured check(s) passed. Parsed page title: ${JSON.stringify(title)}.`,
-    checks, verdict: verdictFor(checks), source: "url",
+    observedOutcome: inspectionError
+      ? `Inspection could not be completed: ${inspectionError}. Configured checks without evidence are UNVERIFIED.`
+      : `${passed} of ${checks.length} configured check(s) passed. Parsed page title: ${JSON.stringify(title)}.`,
+    checks, verdict: verdictFromChecks(checks), source: "url",
   };
   saveRun(run);
   return run;
@@ -115,7 +111,7 @@ export function createDemoRun(boardName: string, taskList: HTMLElement): Run {
     contract: { id: `demo-${boardName.toLowerCase().replace(/\W+/g, "-")}`, name: `${boardName} task creation`, targetUrl: "local demo board", requiredText: phrase, forbiddenText: "", expectedTitle: boardName, minimumElements: 1, agentClaim: claim, createdAt: new Date().toISOString() },
     agentClaim: claim, expectedOutcome: `Rendered task list contains “${phrase}”.`,
     observedOutcome: pass ? `Rendered task list contains ${matching.length} exact matching task item(s).` : `Rendered task list contains no exact matching task item.`,
-    checks, verdict: verdictFor(checks), source: "demo",
+    checks, verdict: verdictFromChecks(checks), source: "demo",
   };
   saveRun(run);
   return run;

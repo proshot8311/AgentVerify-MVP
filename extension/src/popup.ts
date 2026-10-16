@@ -161,10 +161,17 @@ function renderResult(input: VerificationInput, result: VerificationResult): voi
 
   const top = document.createElement("div");
   top.className = "result-top";
+  const verdictClass = result.verdict === "PASS"
+    ? "pass"
+    : result.verdict === "FAIL"
+      ? "fail"
+      : result.verdict === "UNVERIFIED"
+        ? "unverified"
+        : "skipped";
   const verdict = createText(
     top,
     "h2",
-    `verdict ${result.verdict === "VERIFIED" ? "verified" : "failed"}`,
+    `verdict ${verdictClass}`,
     result.verdict,
   );
   verdict.setAttribute("aria-label", `Verdict: ${result.verdict}`);
@@ -189,7 +196,7 @@ function renderResult(input: VerificationInput, result: VerificationResult): voi
       resultRegion,
       "p",
       "form-error",
-      `Inspection unavailable: ${result.unavailableReason}. The verdict is FAILED because the contract could not be checked; no page content was inferred.`,
+      `Inspection unavailable: ${result.unavailableReason}. Checks without evidence are UNVERIFIED; no conclusion was inferred.`,
     );
   }
 
